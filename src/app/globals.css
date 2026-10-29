@@ -1,26 +1,283 @@
 @import "tailwindcss";
 
+/*
+ * KROMA OS — design tokens.
+ * Paleta extraída das referências: roxo do vidro/cromo, verde-limão das bordas
+ * luminosas e brancos perolados do fundo. O limão é sempre acento (nunca texto sobre branco).
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --kroma-purple: #7625f5;
+  --kroma-purple-600: #6419db;
+  --kroma-purple-light: #a855f7;
+  --kroma-purple-50: #f3ecff;
+  --kroma-lime: #c6ff00;
+  --kroma-lime-soft: #e9ff9e;
+  --kroma-lime-ink: #3d5200;
+  --kroma-black: #111015;
+
+  --background: #f4f2f7;
+  --surface: rgba(255, 255, 255, 0.7);
+  --surface-strong: rgba(255, 255, 255, 0.88);
+  --surface-muted: rgba(246, 243, 250, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.78);
+  --hairline: rgba(23, 20, 29, 0.07);
+
+  --text-primary: #17141d;
+  --text-secondary: #6b6574;
+  --text-tertiary: #9a94a3;
+
+  --danger: #e5484d;
+  --warning: #e08a00;
+  --success: #3e9b12;
+
+  --shadow-soft: 0 8px 32px rgba(30, 20, 50, 0.05);
+  --shadow-lift: 0 18px 48px rgba(60, 20, 120, 0.1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @theme inline {
   --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-foreground: var(--text-primary);
+  --color-ink: var(--text-primary);
+  --color-ink-2: var(--text-secondary);
+  --color-ink-3: var(--text-tertiary);
+  --color-purple: var(--kroma-purple);
+  --color-purple-600: var(--kroma-purple-600);
+  --color-purple-light: var(--kroma-purple-light);
+  --color-purple-50: var(--kroma-purple-50);
+  --color-lime: var(--kroma-lime);
+  --color-lime-soft: var(--kroma-lime-soft);
+  --color-lime-ink: var(--kroma-lime-ink);
+  --color-kblack: var(--kroma-black);
+  --color-surface: var(--surface);
+  --color-surface-strong: var(--surface-strong);
+  --color-surface-muted: var(--surface-muted);
+  --color-hairline: var(--hairline);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+
+  --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-unbounded), var(--font-manrope), ui-sans-serif, sans-serif;
+
+  --radius-glass: 20px;
+  --shadow-soft: var(--shadow-soft);
+  --shadow-lift: var(--shadow-lift);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "ss01", "cv11";
+}
+
+::selection {
+  background: color-mix(in srgb, var(--kroma-purple) 22%, transparent);
+}
+
+/* ─────────────────────────────── Vidro ─────────────────────────────── */
+
+@utility glass {
+  background: var(--surface);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    var(--shadow-soft),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  border-radius: var(--radius-glass);
+}
+
+@utility glass-strong {
+  background: var(--surface-strong);
+  backdrop-filter: blur(32px) saturate(1.5);
+  -webkit-backdrop-filter: blur(32px) saturate(1.5);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    0 24px 64px rgba(30, 20, 50, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+/* Borda luminosa com reflexo roxo → limão, aplicada via máscara (não afeta o layout). */
+@utility glow-border {
+  position: relative;
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    padding: 1px;
+    border-radius: inherit;
+    background: linear-gradient(135deg, rgba(118, 37, 245, 0.45), rgba(255, 255, 255, 0) 38%, rgba(255, 255, 255, 0) 62%, rgba(198, 255, 0, 0.55));
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    -webkit-mask-composite: xor;
+    opacity: 0;
+    transition: opacity 0.35s var(--ease-out);
+    pointer-events: none;
+  }
+}
+
+@utility card-hover {
+  transition:
+    transform 0.3s var(--ease-out),
+    box-shadow 0.3s var(--ease-out),
+    border-color 0.3s var(--ease-out);
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      var(--shadow-lift),
+      inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  }
+  &:hover::before {
+    opacity: 1;
+  }
+}
+
+@utility chrome-text {
+  background: linear-gradient(180deg, #2a2433 0%, #6b6574 45%, #17141d 55%, #3b3346 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(23, 20, 29, 0.15) transparent;
+}
+
+/* Dispositivos sem suporte ou com pouca potência: vidro vira superfície opaca. */
+@supports not (backdrop-filter: blur(1px)) {
+  .glass,
+  .glass-strong {
+    background: rgba(255, 255, 255, 0.94);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass,
+  .glass-strong {
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Entrada de menus e popovers: escala + fade, origem no ponto de ancoragem. */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-4px);
+  }
+}
+.pop-in {
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin, var(--radix-popover-content-transform-origin, top));
+  animation: pop-in 0.16s var(--ease-out);
+}
+
+/* Flutuação discreta da marca (desligada com movimento reduzido). */
+@keyframes float {
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+/* ────────────────────── Editor de texto (TipTap) ────────────────────── */
+
+.rich-text {
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  color: var(--text-primary);
+}
+.rich-text:focus {
+  outline: none;
+}
+.rich-text > * + * {
+  margin-top: 0.6em;
+}
+.rich-text h1 {
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+.rich-text h2 {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+.rich-text h3 {
+  font-size: 1rem;
+  font-weight: 700;
+}
+.rich-text ul {
+  list-style: disc;
+  padding-left: 1.4em;
+}
+.rich-text ol {
+  list-style: decimal;
+  padding-left: 1.4em;
+}
+.rich-text a {
+  color: var(--kroma-purple);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.rich-text blockquote {
+  border-left: 3px solid var(--kroma-purple-light);
+  padding-left: 0.9em;
+  color: var(--text-secondary);
+}
+.rich-text code {
+  background: var(--kroma-purple-50);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.88em;
+}
+.rich-text p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--text-tertiary);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* ───────────────────────── Busca global (cmdk) ───────────────────────── */
+.search-group [cmdk-group-heading] {
+  padding: 0.6rem 0.75rem 0.35rem;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.search-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: 0.85rem;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+.search-item[data-selected="true"] {
+  background: var(--kroma-purple-50);
 }

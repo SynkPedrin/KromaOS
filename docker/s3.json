@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "kroma",
+      "credentials": [{ "accessKey": "kroma-dev-access", "secretKey": "kroma-dev-secret-key" }],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

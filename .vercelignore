@@ -1,0 +1,13 @@
+# Segredos e dados locais nunca vão para o build da Vercel.
+.env
+.env.local
+.env.*.local
+.env.test
+.storage
+.storage-test
+test-results
+playwright-report
+e2e/.auth
+node_modules
+.next
+src/generated

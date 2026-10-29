@@ -1,0 +1,32 @@
+# Infra local de desenvolvimento do KROMA OS.
+# Portas não-padrão para não colidir com outros serviços da máquina.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: kroma
+      POSTGRES_PASSWORD: kroma
+      POSTGRES_DB: kroma
+    ports:
+      - "5434:5432"
+    volumes:
+      - kroma-pg:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kroma"]
+      interval: 5s
+      retries: 10
+
+  # Storage S3-compatível local (SeaweedFS). Em produção use Cloudflare R2 ou outro S3.
+  s3:
+    image: chrislusf/seaweedfs:latest
+    command: server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data -master.volumeSizeLimitMB=1024
+    ports:
+      - "9100:8333"
+    volumes:
+      - kroma-s3:/data
+      - ./docker/s3.json:/etc/seaweedfs/s3.json:ro
+
+volumes:
+  kroma-pg:
+  kroma-s3:

@@ -1,0 +1,606 @@
+// KROMA OS — esquema relacional.
+// Convenções:
+// - Valores monetários em centavos (Int) para evitar erros de ponto flutuante.
+// - Clientes e tarefas são arquivados (archivedAt), nunca apagados pela interface.
+// - Subtarefas são Tasks com parentId (um único nível, garantido na camada de serviço).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── Usuários e acesso ─────────────────────────────
+
+enum Role {
+  ADMIN
+  MANAGER
+  MEMBER
+}
+
+model User {
+  id             String    @id @default(cuid())
+  name           String
+  email          String    @unique
+  passwordHash   String
+  role           Role      @default(MEMBER)
+  jobTitle       String?
+  // Gestores só veem dados financeiros quando um administrador autoriza.
+  canViewFinance Boolean   @default(false)
+  avatarColor    String    @default("#7625F5")
+  active         Boolean   @default(true)
+  lastLoginAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  sessions          Session[]
+  clientMemberships ClientMember[]
+  assignedTasks     Task[]            @relation("TaskAssignee")
+  createdTasks      Task[]            @relation("TaskCreator")
+  comments          TaskComment[]
+  activities        TaskActivity[]
+  timeEntries       TimeEntry[]
+  notifications     Notification[]    @relation("NotificationRecipient")
+  triggeredNotifs   Notification[]    @relation("NotificationActor")
+  files             FileAsset[]
+  invitationsSent   Invitation[]      @relation("InvitationInviter")
+  approvals         ContentApproval[]
+  publishedContent  ContentMetadata[] @relation("ContentPublisher")
+  invoicesCreated   Invoice[]
+  cashEntries       CashEntry[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  // SHA-256 do token; o token em si só existe no cookie do navegador.
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  userAgent String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Invitation {
+  id             String    @id @default(cuid())
+  email          String
+  name           String
+  jobTitle       String?
+  role           Role      @default(MEMBER)
+  canViewFinance Boolean   @default(false)
+  tokenHash      String    @unique
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  revokedAt      DateTime?
+  invitedById    String
+  sendCount      Int       @default(0)
+  lastSentAt     DateTime?
+  lastError      String?
+  createdAt      DateTime  @default(now())
+
+  invitedBy User @relation("InvitationInviter", fields: [invitedById], references: [id])
+
+  @@index([email])
+}
+
+// Janela fixa de rate limiting persistida no banco (funciona em serverless).
+model RateLimit {
+  key         String   @id
+  windowStart DateTime
+  count       Int
+}
+
+// ───────────────────────────────── Clientes ──────────────────────────────────
+
+enum ClientStatus {
+  PROSPECT
+  ONBOARDING
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+enum ServiceType {
+  SOCIAL_MEDIA
+  PAID_TRAFFIC
+  BRANDING
+  LANDING_PAGE
+  AUTOMATION
+  AI
+  OTHER
+}
+
+model Client {
+  id          String       @id @default(cuid())
+  name        String
+  contactName String?
+  email       String?
+  whatsapp    String?
+  segment     String?
+  status      ClientStatus @default(PROSPECT)
+  startDate   DateTime?
+  endDate     DateTime?
+  notes       String?
+  logoFileId  String?      @unique
+  // Identidade visual: cores em hexadecimal (#RRGGBB) e fontes da marca.
+  brandColors String[]     @default([])
+  brandFonts  String?
+  archivedAt  DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  logo             FileAsset?        @relation("ClientLogo", fields: [logoFileId], references: [id], onDelete: SetNull)
+  services         ClientService[]
+  members          ClientMember[]
+  contracts        ClientContract[]
+  tasks            Task[]
+  invoices         Invoice[]
+  mediaInvestments MediaInvestment[]
+  files            FileAsset[]       @relation("ClientFiles")
+  cashEntries      CashEntry[]
+
+  @@index([status])
+  @@index([archivedAt])
+  // Busca por similaridade (pg_trgm, extensão criada na migration inicial).
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Client_name_trgm")
+}
+
+model ClientService {
+  clientId String
+  service  ServiceType
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@id([clientId, service])
+}
+
+// Membros com acesso explícito ao cliente (usuários com papel MEMBER só veem clientes vinculados).
+model ClientMember {
+  clientId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([clientId, userId])
+  @@index([userId])
+}
+
+// ───────────────────────────────── Financeiro ────────────────────────────────
+
+enum ContractType {
+  MONTHLY
+  PROJECT
+  HYBRID
+}
+
+enum ContractStatus {
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+// Dados comerciais ficam fora de Client para que nunca vazem em consultas operacionais.
+model ClientContract {
+  id               String         @id @default(cuid())
+  clientId         String
+  type             ContractType   @default(MONTHLY)
+  status           ContractStatus @default(ACTIVE)
+  setupFeeCents    Int            @default(0)
+  monthlyFeeCents  Int            @default(0)
+  // Orçamento mensal planejado de mídia do cliente. NÃO é receita da agência.
+  mediaBudgetCents Int            @default(0)
+  billingDay       Int?
+  startDate        DateTime?
+  endDate          DateTime?
+  notes            String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, status])
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELED
+}
+
+model Invoice {
+  id          String        @id @default(cuid())
+  clientId    String
+  // Primeiro dia do mês de competência.
+  competence  DateTime
+  description String
+  amountCents Int
+  dueDate     DateTime
+  status      InvoiceStatus @default(PENDING)
+  paidAt      DateTime?
+  createdById String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  client    Client     @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  createdBy User       @relation(fields: [createdById], references: [id])
+  cashEntry CashEntry?
+
+  @@index([clientId])
+  @@index([status, dueDate])
+  @@index([competence])
+}
+
+enum AdPlatform {
+  META
+  GOOGLE
+  TIKTOK
+  LINKEDIN
+  OTHER
+}
+
+model MediaInvestment {
+  id           String     @id @default(cuid())
+  clientId     String
+  platform     AdPlatform
+  // Primeiro dia do mês de referência.
+  month        DateTime
+  plannedCents Int        @default(0)
+  actualCents  Int?
+  notes        String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  @@unique([clientId, platform, month])
+  @@index([month])
+}
+
+// ─────────────────────────── Fluxo de caixa ───────────────────────────
+
+enum CashEntryType {
+  INCOME
+  EXPENSE
+}
+
+// Entradas e saídas da conta da agência. Só lançamentos realizados (settled) compõem o saldo;
+// os demais são previsões (contas a pagar/receber).
+model CashEntry {
+  id          String        @id @default(cuid())
+  type        CashEntryType
+  description String
+  amountCents Int
+  // Data do lançamento (data pura, 12:00 UTC).
+  date        DateTime
+  category    String
+  settled     Boolean       @default(true)
+  clientId    String?
+  // Entrada gerada automaticamente ao marcar uma cobrança como paga.
+  invoiceId   String?       @unique
+  notes       String?
+  createdById String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  client    Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  createdBy User     @relation(fields: [createdById], references: [id])
+
+  @@index([date])
+  @@index([type, date])
+  @@index([settled])
+}
+
+// Configuração única (id = "default"): saldo da conta antes do primeiro lançamento registrado.
+model FinanceSettings {
+  id                  String   @id @default("default")
+  openingBalanceCents Int      @default(0)
+  updatedAt           DateTime @updatedAt
+}
+
+// ────────────────────────────────── Tarefas ──────────────────────────────────
+
+enum TaskType {
+  STATIC_POST
+  CAROUSEL
+  REEL
+  AD_CREATIVE
+  COPY
+  PAID_TRAFFIC
+  LANDING_PAGE
+  BRANDING
+  MEETING
+  ADMIN
+  OTHER
+}
+
+enum TaskStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  IN_REVIEW
+  AWAITING_APPROVAL
+  DONE
+}
+
+enum TaskPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+model Task {
+  id              String       @id @default(cuid())
+  // Número sequencial legível (KR-123).
+  number          Int          @unique @default(autoincrement())
+  title           String
+  // Documento TipTap (JSON) validado e higienizado no servidor.
+  description     Json?
+  clientId        String?
+  assigneeId      String?
+  creatorId       String
+  parentId        String?
+  type            TaskType     @default(OTHER)
+  status          TaskStatus   @default(TODO)
+  priority        TaskPriority @default(NORMAL)
+  startDate       DateTime?
+  dueDate         DateTime?
+  estimateMinutes Int?
+  // Ordenação dentro da coluna do Kanban.
+  position        Float        @default(0)
+  completedAt     DateTime?
+  archivedAt      DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  client        Client?           @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  assignee      User?             @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  creator       User              @relation("TaskCreator", fields: [creatorId], references: [id])
+  parent        Task?             @relation("Subtasks", fields: [parentId], references: [id], onDelete: Cascade)
+  subtasks      Task[]            @relation("Subtasks")
+  checklist     ChecklistItem[]
+  comments      TaskComment[]
+  activities    TaskActivity[]
+  files         FileAsset[]       @relation("TaskFiles")
+  timeEntries   TimeEntry[]
+  content       ContentMetadata?
+  approvals     ContentApproval[]
+  notifications Notification[]
+
+  @@index([clientId, status])
+  @@index([assigneeId, status])
+  @@index([parentId])
+  @@index([dueDate])
+  @@index([status, position])
+  @@index([archivedAt])
+  @@index([createdAt])
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "Task_title_trgm")
+}
+
+model ChecklistItem {
+  id        String   @id @default(cuid())
+  taskId    String
+  text      String
+  done      Boolean  @default(false)
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+}
+
+model TaskComment {
+  id         String    @id @default(cuid())
+  taskId     String
+  authorId   String
+  body       String
+  mentionIds String[]  @default([])
+  editedAt   DateTime?
+  createdAt  DateTime  @default(now())
+
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author User @relation(fields: [authorId], references: [id])
+
+  @@index([taskId, createdAt])
+}
+
+model TaskActivity {
+  id        String   @id @default(cuid())
+  taskId    String
+  actorId   String
+  // Ex.: created, status_changed, assignee_changed, file_added...
+  action    String
+  data      Json?
+  createdAt DateTime @default(now())
+
+  task  Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actor User @relation(fields: [actorId], references: [id])
+
+  @@index([taskId, createdAt])
+}
+
+enum TimeEntrySource {
+  TIMER
+  MANUAL
+}
+
+model TimeEntry {
+  id              String          @id @default(cuid())
+  userId          String
+  taskId          String
+  startedAt       DateTime
+  // Nulo enquanto o timer estiver rodando. Um índice parcial único (ver migration)
+  // impede mais de um timer ativo por usuário.
+  endedAt         DateTime?
+  durationSeconds Int?
+  source          TimeEntrySource @default(TIMER)
+  note            String?
+  createdAt       DateTime        @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([userId, endedAt])
+}
+
+// ─────────────────────────────────── Studio ──────────────────────────────────
+
+enum ContentPlatform {
+  INSTAGRAM
+  TIKTOK
+  FACEBOOK
+  LINKEDIN
+  OTHER
+}
+
+enum ApprovalStatus {
+  IN_PRODUCTION
+  INTERNAL_REVIEW
+  AWAITING_APPROVAL
+  CHANGES_REQUESTED
+  APPROVED
+  PUBLISHED
+}
+
+// Metadados de conteúdo de uma tarefa do Studio (post, carrossel, reel, criativo).
+model ContentMetadata {
+  taskId          String            @id
+  objective       String?
+  platforms       ContentPlatform[] @default([])
+  caption         String?
+  hashtags        String?
+  cta             String?
+  requiresCaption Boolean           @default(true)
+  // Data planejada de publicação — diferente do prazo de entrega (Task.dueDate).
+  publishAt       DateTime?
+  approvalStatus  ApprovalStatus    @default(IN_PRODUCTION)
+  publishedAt     DateTime?
+  publishedById   String?
+  updatedAt       DateTime          @updatedAt
+
+  task        Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  publishedBy User? @relation("ContentPublisher", fields: [publishedById], references: [id])
+
+  @@index([publishAt])
+  @@index([approvalStatus])
+}
+
+enum ApprovalKind {
+  INTERNAL
+  CLIENT
+}
+
+enum ApprovalDecision {
+  APPROVED
+  CHANGES_REQUESTED
+}
+
+// Histórico de aprovações. Aprovação do cliente é registrada manualmente pela equipe.
+model ContentApproval {
+  id            String           @id @default(cuid())
+  taskId        String
+  kind          ApprovalKind
+  decision      ApprovalDecision
+  note          String?
+  // Nome de quem aprovou do lado do cliente (quando kind = CLIENT).
+  clientContact String?
+  recordedById  String
+  createdAt     DateTime         @default(now())
+
+  task       Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  recordedBy User @relation(fields: [recordedById], references: [id])
+
+  @@index([taskId, createdAt])
+}
+
+// ────────────────────────────────── Arquivos ─────────────────────────────────
+
+enum FileKind {
+  IMAGE
+  VIDEO
+  DOCUMENT
+}
+
+// Organização dos arquivos enviados direto ao cliente (anexos de tarefas ficam sem categoria).
+enum ClientFileCategory {
+  LOGO
+  BRAND
+  PHOTO
+  DOCUMENT
+}
+
+enum FileStatus {
+  PENDING
+  READY
+}
+
+model FileAsset {
+  id           String              @id @default(cuid())
+  storageKey   String              @unique
+  originalName String
+  mimeType     String
+  extension    String
+  sizeBytes    BigInt
+  kind         FileKind
+  category     ClientFileCategory?
+  status       FileStatus          @default(PENDING)
+  uploadedById String
+  taskId       String?
+  clientId     String?
+  createdAt    DateTime            @default(now())
+
+  uploadedBy User    @relation(fields: [uploadedById], references: [id])
+  task       Task?   @relation("TaskFiles", fields: [taskId], references: [id], onDelete: Cascade)
+  client     Client? @relation("ClientFiles", fields: [clientId], references: [id], onDelete: Cascade)
+  logoOf     Client? @relation("ClientLogo")
+
+  @@index([taskId])
+  @@index([clientId])
+  @@index([status, createdAt])
+}
+
+// ──────────────────────────────── Notificações ───────────────────────────────
+
+enum NotificationType {
+  TASK_ASSIGNED
+  COMMENT
+  MENTION
+  DUE_SOON
+  OVERDUE
+  APPROVAL_REQUESTED
+  CHANGES_REQUESTED
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  actorId   String?
+  type      NotificationType
+  title     String
+  body      String?
+  taskId    String?
+  // Evita notificações duplicadas geradas pela rotina agendada.
+  dedupeKey String?          @unique
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user  User  @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor User? @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  task  Task? @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+}
