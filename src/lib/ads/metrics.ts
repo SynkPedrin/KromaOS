@@ -107,6 +107,9 @@ const BY_GOAL: Record<string, ResultKind | null> = {
   THRUPLAY: "video_view",
   TWO_SECOND_CONTINUOUS_VIDEO_VIEWS: "video_view",
   APP_INSTALLS: "app_install",
+  // Visitas ao perfil não têm action_type estável nos insights: sem resultado por ação (não usar cliques).
+  VISIT_INSTAGRAM_PROFILE: null,
+  PROFILE_VISIT: null,
   // Reconhecimento: o resultado é alcance/impressões, não uma ação.
   REACH: null,
   IMPRESSIONS: null,
@@ -307,6 +310,7 @@ export const OPTIMIZATION_LABEL: Record<string, string> = {
   IMPRESSIONS: "Impressões",
   THRUPLAY: "ThruPlay",
   PROFILE_VISIT: "Visitas ao perfil",
+  VISIT_INSTAGRAM_PROFILE: "Visitas ao perfil do Instagram",
   APP_INSTALLS: "Instalações do app",
   AD_RECALL_LIFT: "Lembrança do anúncio",
 };

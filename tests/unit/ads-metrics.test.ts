@@ -92,6 +92,9 @@ describe("interpretação de resultados", () => {
     expect(resultKindFor({ optimizationGoal: "CONVERSATIONS" }, "OUTCOME_ENGAGEMENT")).toBe("messaging");
     expect(resultKindFor({ optimizationGoal: "OFFSITE_CONVERSIONS", promotedObject: { custom_event_type: "PURCHASE" } }, "OUTCOME_SALES")).toBe("purchase");
     expect(resultKindFor({ optimizationGoal: "REACH" }, "OUTCOME_AWARENESS")).toBeNull();
+    // Tráfego para o perfil do Instagram não vira "cliques no link" pelo objetivo da campanha.
+    expect(resultKindFor({ optimizationGoal: "VISIT_INSTAGRAM_PROFILE" }, "OUTCOME_TRAFFIC")).toBeNull();
+    expect(resultKindFor({ optimizationGoal: "CONVERSATIONS", destinationType: "WHATSAPP" } as never, "OUTCOME_SALES")).toBe("messaging");
     expect(resultKindFor({ optimizationGoal: null }, "OUTCOME_TRAFFIC")).toBe("link_click");
     expect(resultKindFor({ optimizationGoal: null }, "SOMETHING_NEW")).toBeNull();
   });

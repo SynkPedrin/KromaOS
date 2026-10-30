@@ -24,7 +24,7 @@ const ADSET_FIELDS =
 const AD_FIELDS = "id,name,adset_id,campaign_id,status,effective_status,creative{id},preview_shareable_link,created_time,updated_time";
 const CREATIVE_FIELDS =
   "id,name,object_type,thumbnail_url,image_url,video_id,body,title,call_to_action_type,object_story_spec,asset_feed_spec,instagram_permalink_url,link_url";
-// Plano B por criativo quando o lote é recusado: menos campos, depois só a miniatura.
+// Plano B quando a Meta recusa algum campo para o formato do criativo: menos campos, depois só a miniatura.
 const CREATIVE_FALLBACK_FIELDS = ["id,name,object_type,thumbnail_url,image_url,video_id,body,title,call_to_action_type,object_story_spec", "id,name,thumbnail_url"];
 const THUMB = { thumbnail_width: 720, thumbnail_height: 720 };
 const METRIC_FIELDS = "date_start,date_stop,spend,impressions,reach,clicks,inline_link_clicks,actions,action_values";
@@ -241,7 +241,7 @@ async function syncEntities(adAccountId: string, act: string, currency: string, 
     for (const s of saved) adSetIds.set(s.externalId, s.id);
   });
 
-  // Criativos em lotes de 50 (?ids=) com miniatura maior que o padrão de 64 px.
+  // Criativos com miniatura maior que o padrão de 64 px, salvos em lotes de 50.
   const creativeExtIds = [...new Set(ads.map((a) => a.creative?.id).filter((x): x is string => !!x))];
   const creativeIds = new Map<string, string>();
   for (let i = 0; i < creativeExtIds.length; i += 50) {
@@ -300,27 +300,22 @@ async function syncEntities(adAccountId: string, act: string, currency: string, 
 const isFatal = (e: unknown) => e instanceof MetaApiError && (e.kind === "auth" || e.kind === "rate_limit");
 
 /**
- * Busca criativos em lote; se a Meta recusar o lote (ex.: um campo indisponível para algum formato),
- * tenta um a um com menos campos. Criativo que ainda falhar fica sem prévia, sem travar a sincronização.
+ * Busca cada criativo pelo ID (o parâmetro ?ids= foi descontinuado na Graph API v26). As chamadas
+ * rodam em paralelo, limitadas pelo cliente HTTP; se um formato recusar algum campo, tenta com menos
+ * campos. Criativo que ainda falhar fica sem prévia, sem travar a sincronização.
  */
 async function fetchCreatives(ids: string[], token: string): Promise<RawCreative[]> {
-  try {
-    return Object.values(await graphGet<Record<string, RawCreative>>("", { ids: ids.join(","), fields: CREATIVE_FIELDS, ...THUMB }, token));
-  } catch (e) {
-    if (isFatal(e)) throw e;
-  }
-  const out: RawCreative[] = [];
-  for (const id of ids) {
-    for (const fields of CREATIVE_FALLBACK_FIELDS) {
+  const one = async (id: string) => {
+    for (const fields of [CREATIVE_FIELDS, ...CREATIVE_FALLBACK_FIELDS]) {
       try {
-        out.push(await graphGet<RawCreative>(id, { fields, ...THUMB }, token));
-        break;
+        return await graphGet<RawCreative>(id, { fields, ...THUMB }, token);
       } catch (e) {
         if (isFatal(e)) throw e;
       }
     }
-  }
-  return out;
+    return null;
+  };
+  return (await Promise.all(ids.map(one))).filter((c): c is RawCreative => !!c);
 }
 
 function insightData(adAccountId: string, level: MetaInsightLevel, r: InsightRow, fallbackId: string) {

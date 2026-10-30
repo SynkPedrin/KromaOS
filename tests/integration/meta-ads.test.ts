@@ -25,7 +25,7 @@ let calls: Call[] = [];
 let scopes = ["ads_read", "public_profile"];
 let tokenValid = true;
 let failWith: { code: number; subcode?: number } | null = null;
-let creativeBatchFails = false;
+let creativeFieldFails = false;
 
 const page = (data: unknown[], after?: string) => ({ data, paging: after ? { cursors: { after }, next: `https://graph.facebook.com/next?after=${after}` } : { cursors: {} } });
 
@@ -73,20 +73,17 @@ function fakeGraph(path: string, p: URLSearchParams) {
         { id: "ad2", name: "Carrossel", adset_id: "s2", campaign_id: "c2", status: "ACTIVE", effective_status: "CAMPAIGN_PAUSED", creative: { id: "cr2" } },
       ]),
     };
-  if (path === "" && p.get("ids") && creativeBatchFails) return { status: 500, body: { error: { message: "(#100) Invalid parameter", code: 100 } } };
-  if (/^cr\d$/.test(path)) {
-    // Consulta individual: o criativo cr2 só responde com os campos mínimos.
-    if (path === "cr2" && p.get("fields") !== "id,name,thumbnail_url") return { status: 400, body: { error: { message: "(#100) field", code: 100 } } };
-    return { status: 200, body: { id: path, name: `Criativo ${path}`, thumbnail_url: `https://scontent.xx.fbcdn.net/${path}.jpg` } };
-  }
-  if (path === "" && p.get("ids"))
+  if (path === "" && p.get("ids")) return { status: 500, body: { error: { message: "The ids query parameter is deprecated in v26.0+.", code: 100 } } };
+  if (path === "cr1")
     return {
       status: 200,
-      body: {
-        cr1: { id: "cr1", video_id: "v1", thumbnail_url: "https://scontent.xx.fbcdn.net/t1.jpg", object_story_spec: { video_data: { message: "Agende sua avaliação", title: "Botox", call_to_action: { type: "WHATSAPP_MESSAGE" } } } },
-        cr2: { id: "cr2", thumbnail_url: "https://scontent.xx.fbcdn.net/t2.jpg", object_story_spec: { link_data: { message: "Conheça", child_attachments: [{ picture: "a" }, { picture: "b" }] } } },
-      },
+      body: { id: "cr1", video_id: "v1", thumbnail_url: "https://scontent.xx.fbcdn.net/t1.jpg", object_story_spec: { video_data: { message: "Agende sua avaliação", title: "Botox", call_to_action: { type: "WHATSAPP_MESSAGE" } } } },
     };
+  if (path === "cr2") {
+    // Formato que recusa algum campo: só responde com os campos mínimos quando creativeFieldFails.
+    if (creativeFieldFails && p.get("fields") !== "id,name,thumbnail_url") return { status: 400, body: { error: { message: "(#100) field", code: 100 } } };
+    return { status: 200, body: { id: "cr2", thumbnail_url: "https://scontent.xx.fbcdn.net/t2.jpg", object_story_spec: { link_data: { message: "Conheça", child_attachments: [{ picture: "a" }, { picture: "b" }] } } } };
+  }
   if (path.endsWith("/insights")) {
     const level = p.get("level");
     const daily = p.get("time_increment") === "1";
@@ -131,7 +128,7 @@ beforeEach(async () => {
   scopes = ["ads_read", "public_profile"];
   tokenValid = true;
   failWith = null;
-  creativeBatchFails = false;
+  creativeFieldFails = false;
   vi.stubGlobal("fetch", async (input: string | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     const path = url.pathname.replace(/^\/v\d+\.\d+\/?/, "");
@@ -256,18 +253,18 @@ describe("sincronização", () => {
     expect(insight?.params.get("use_unified_attribution_setting")).toBe("true");
   });
 
-  it("lote de criativos recusado (HTTP 500 com #100) não derruba a sincronização", async () => {
+  it("busca criativos um a um (sem ?ids=, descontinuado na v26) e contorna campo recusado", async () => {
     const { account } = await connectedSetup();
-    creativeBatchFails = true;
+    creativeFieldFails = true;
     const r = await syncAdAccount(account.id, { kind: "RECENT" });
     expect(r.status).toBe("SUCCESS");
     expect(await db.metaAd.count()).toBe(2);
     expect((await db.metaCreative.findMany({ orderBy: { externalId: "asc" } })).map((c) => c.thumbnailUrl)).toEqual([
-      "https://scontent.xx.fbcdn.net/cr1.jpg",
-      "https://scontent.xx.fbcdn.net/cr2.jpg",
+      "https://scontent.xx.fbcdn.net/t1.jpg",
+      "https://scontent.xx.fbcdn.net/t2.jpg",
     ]);
-    // Um único pedido do lote (sem repetir 3x como se fosse instabilidade).
-    expect(calls.filter((c) => c.path === "" && c.params.get("ids")).length).toBe(1);
+    expect(calls.some((c) => c.params.get("ids"))).toBe(false);
+    expect(calls.find((c) => c.path === "cr1")?.params.get("thumbnail_width")).toBe("720");
   });
 
   it("reprocessar o mesmo intervalo substitui as métricas (sem duplicar)", async () => {
