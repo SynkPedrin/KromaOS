@@ -7,7 +7,7 @@ import * as comments from "@/server/services/comments";
 import * as time from "@/server/services/time";
 import * as content from "@/server/services/content";
 import * as calendar from "@/server/services/calendar";
-import type { ContentPatch, QuickTaskInput, TaskPatch } from "@/lib/schemas";
+import type { AgendaEventInput, ContentPatch, QuickTaskInput, TaskPatch } from "@/lib/schemas";
 import type { TaskStatus } from "@/generated/prisma/enums";
 
 // Listas renderizadas no servidor dependem destas tarefas; o layout cobre todas as rotas do app.
@@ -118,3 +118,33 @@ export async function rescheduleAction(taskId: string, input: calendar.Reschedul
     refresh();
   });
 }
+
+export async function createAgendaEventAction(input: AgendaEventInput) {
+  return withUser(async (u) => {
+    const e = await calendar.createAgendaEvent(u, input);
+    refresh();
+    return { id: e.id };
+  });
+}
+
+export async function updateAgendaEventAction(eventId: string, input: AgendaEventInput) {
+  return withUser(async (u) => {
+    await calendar.updateAgendaEvent(u, eventId, input);
+    refresh();
+  });
+}
+
+export async function deleteAgendaEventAction(eventId: string) {
+  return withUser(async (u) => {
+    await calendar.deleteAgendaEvent(u, eventId);
+    refresh();
+  });
+}
+
+export async function moveAgendaEventAction(eventId: string, startsAt: string) {
+  return withUser(async (u) => {
+    await calendar.moveAgendaEvent(u, eventId, startsAt);
+    refresh();
+  });
+}
+

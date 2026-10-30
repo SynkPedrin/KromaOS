@@ -1,18 +1,23 @@
 import "server-only";
 import { z } from "zod";
 import { db } from "@/server/db";
-import { taskScope, type Actor } from "@/server/auth/permissions";
-import { invalid } from "@/server/errors";
+import type { Prisma } from "@/generated/prisma/client";
+import { clientScope, isManagerOrAdmin, taskScope, type Actor } from "@/server/auth/permissions";
+import { forbidden, invalid, notFound } from "@/server/errors";
+import { agendaEventSchema, type AgendaEventInput } from "@/lib/schemas";
 import { dateOnly } from "@/lib/dates";
 import { logActivity, userPublic } from "./shared";
 import { getVisibleTask } from "./tasks";
 
 /**
- * Eventos do calendário editorial. Uma mesma tarefa pode gerar dois eventos distintos:
+ * Itens do calendário. Uma mesma tarefa pode gerar dois itens distintos:
  * - "due": prazo de entrega (quando o trabalho precisa estar pronto)
  * - "publish": data de publicação do conteúdo
+ * e há os eventos da agenda ("event": reuniões, gravações, calls), que não são tarefas.
  */
-export type CalendarEvent = {
+export type CalendarEvent = TaskCalendarEvent | AgendaCalendarEvent;
+
+export type TaskCalendarEvent = {
   key: string;
   kind: "due" | "publish";
   date: string; // ISO
@@ -25,6 +30,62 @@ export type CalendarEvent = {
   client: { id: string; name: string } | null;
   assignee: { id: string; name: string; avatarColor: string } | null;
 };
+
+export type AgendaCalendarEvent = {
+  key: string;
+  kind: "event";
+  date: string; // início (ISO)
+  endsAt: string | null;
+  allDay: boolean;
+  eventId: string;
+  title: string;
+  location: string | null;
+  notes: string | null;
+  client: { id: string; name: string } | null;
+  attendees: { id: string; name: string; avatarColor: string }[];
+  createdBy: { id: string; name: string; avatarColor: string };
+  canEdit: boolean;
+};
+
+/** Eventos sem cliente são da equipe toda; com cliente, seguem o acesso ao cliente. Convidados sempre veem. */
+function agendaScope(actor: Actor): Prisma.AgendaEventWhereInput {
+  if (isManagerOrAdmin(actor)) return {};
+  return { OR: [{ clientId: null }, { client: clientScope(actor) }, { attendees: { some: { userId: actor.id } } }, { createdById: actor.id }] };
+}
+
+const canEditAgendaEvent = (actor: Actor, e: { createdById: string }) => e.createdById === actor.id || isManagerOrAdmin(actor);
+
+const agendaSelect = {
+  id: true,
+  title: true,
+  startsAt: true,
+  endsAt: true,
+  allDay: true,
+  location: true,
+  notes: true,
+  createdById: true,
+  client: { select: { id: true, name: true } },
+  createdBy: { select: userPublic },
+  attendees: { select: { user: { select: userPublic } } },
+} satisfies Prisma.AgendaEventSelect;
+
+function toCalendarItem(actor: Actor, e: Prisma.AgendaEventGetPayload<{ select: typeof agendaSelect }>): AgendaCalendarEvent {
+  return {
+    key: `${e.id}:event`,
+    kind: "event",
+    date: e.startsAt.toISOString(),
+    endsAt: e.endsAt?.toISOString() ?? null,
+    allDay: e.allDay,
+    eventId: e.id,
+    title: e.title,
+    location: e.location,
+    notes: e.notes,
+    client: e.client,
+    attendees: e.attendees.map((a) => a.user),
+    createdBy: e.createdBy,
+    canEdit: canEditAgendaEvent(actor, e),
+  };
+}
 
 export async function listCalendarEvents(actor: Actor, from: Date, to: Date, clientId?: string) {
   const tasks = await db.task.findMany({
@@ -50,7 +111,22 @@ export async function listCalendarEvents(actor: Actor, from: Date, to: Date, cli
     take: 1000,
   });
 
-  const events: CalendarEvent[] = [];
+  // Eventos que começam no período ou que ainda estão acontecendo nele.
+  const agenda = await db.agendaEvent.findMany({
+    where: {
+      AND: [
+        agendaScope(actor),
+        clientId ? { clientId } : {},
+        { startsAt: { lt: to } },
+        { OR: [{ startsAt: { gte: from } }, { endsAt: { gte: from } }] },
+      ],
+    },
+    select: agendaSelect,
+    orderBy: { startsAt: "asc" },
+    take: 1000,
+  });
+
+  const events: CalendarEvent[] = agenda.map((e) => toCalendarItem(actor, e));
   for (const t of tasks) {
     const base = {
       taskId: t.id,
@@ -93,3 +169,69 @@ export async function rescheduleEvent(actor: Actor, taskId: string, input: Resch
   await db.contentMetadata.update({ where: { taskId }, data: { publishAt: new Date(data.at) } });
   await logActivity(db, taskId, actor.id, "publish_date_changed", { to: data.at });
 }
+
+// ─────────────────────────── Eventos da agenda ───────────────────────────
+
+async function eventData(actor: Actor, input: AgendaEventInput) {
+  const d = agendaEventSchema.parse(input);
+  if (d.clientId) {
+    const ok = await db.client.count({ where: { AND: [{ id: d.clientId }, clientScope(actor)] } });
+    if (!ok) throw notFound("Cliente");
+  }
+  const attendeeIds = [...new Set(d.attendeeIds)];
+  if (attendeeIds.length && (await db.user.count({ where: { id: { in: attendeeIds }, active: true } })) !== attendeeIds.length) {
+    throw invalid("Participante inválido.");
+  }
+  return {
+    attendeeIds,
+    data: {
+      title: d.title,
+      startsAt: new Date(d.startsAt),
+      endsAt: d.endsAt ? new Date(d.endsAt) : null,
+      allDay: d.allDay,
+      clientId: d.clientId ?? null,
+      location: d.location || null,
+      notes: d.notes || null,
+    },
+  };
+}
+
+async function editableEvent(actor: Actor, eventId: string) {
+  const e = await db.agendaEvent.findFirst({ where: { AND: [{ id: eventId }, agendaScope(actor)] } });
+  if (!e) throw notFound("Evento");
+  if (!canEditAgendaEvent(actor, e)) throw forbidden("Apenas quem criou o evento ou um gestor pode alterá-lo.");
+  return e;
+}
+
+export async function createAgendaEvent(actor: Actor, input: AgendaEventInput) {
+  const { data, attendeeIds } = await eventData(actor, input);
+  return db.agendaEvent.create({
+    data: { ...data, createdById: actor.id, attendees: { create: attendeeIds.map((userId) => ({ userId })) } },
+  });
+}
+
+export async function updateAgendaEvent(actor: Actor, eventId: string, input: AgendaEventInput) {
+  await editableEvent(actor, eventId);
+  const { data, attendeeIds } = await eventData(actor, input);
+  return db.$transaction(async (tx) => {
+    await tx.agendaEventAttendee.deleteMany({ where: { eventId } });
+    return tx.agendaEvent.update({
+      where: { id: eventId },
+      data: { ...data, attendees: { create: attendeeIds.map((userId) => ({ userId })) } },
+    });
+  });
+}
+
+export async function deleteAgendaEvent(actor: Actor, eventId: string) {
+  await editableEvent(actor, eventId);
+  await db.agendaEvent.delete({ where: { id: eventId } });
+}
+
+/** Arrastar no calendário: o navegador manda o novo início; a duração é preservada. */
+export async function moveAgendaEvent(actor: Actor, eventId: string, startsAtIso: string) {
+  const e = await editableEvent(actor, eventId);
+  const startsAt = new Date(z.string().datetime({ offset: true }).parse(startsAtIso));
+  const endsAt = e.endsAt ? new Date(startsAt.getTime() + (e.endsAt.getTime() - e.startsAt.getTime())) : null;
+  await db.agendaEvent.update({ where: { id: eventId }, data: { startsAt, endsAt } });
+}
+

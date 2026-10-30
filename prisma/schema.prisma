@@ -36,21 +36,23 @@ model User {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  sessions          Session[]
-  clientMemberships ClientMember[]
-  assignedTasks     Task[]            @relation("TaskAssignee")
-  createdTasks      Task[]            @relation("TaskCreator")
-  comments          TaskComment[]
-  activities        TaskActivity[]
-  timeEntries       TimeEntry[]
-  notifications     Notification[]    @relation("NotificationRecipient")
-  triggeredNotifs   Notification[]    @relation("NotificationActor")
-  files             FileAsset[]
-  invitationsSent   Invitation[]      @relation("InvitationInviter")
-  approvals         ContentApproval[]
-  publishedContent  ContentMetadata[] @relation("ContentPublisher")
-  invoicesCreated   Invoice[]
-  cashEntries       CashEntry[]
+  sessions             Session[]
+  clientMemberships    ClientMember[]
+  assignedTasks        Task[]                @relation("TaskAssignee")
+  createdTasks         Task[]                @relation("TaskCreator")
+  comments             TaskComment[]
+  activities           TaskActivity[]
+  timeEntries          TimeEntry[]
+  notifications        Notification[]        @relation("NotificationRecipient")
+  triggeredNotifs      Notification[]        @relation("NotificationActor")
+  files                FileAsset[]
+  invitationsSent      Invitation[]          @relation("InvitationInviter")
+  approvals            ContentApproval[]
+  publishedContent     ContentMetadata[]     @relation("ContentPublisher")
+  invoicesCreated      Invoice[]
+  cashEntries          CashEntry[]
+  agendaEvents         AgendaEvent[]
+  agendaEventAttendees AgendaEventAttendee[]
 }
 
 model Session {
@@ -146,6 +148,7 @@ model Client {
   mediaInvestments MediaInvestment[]
   files            FileAsset[]       @relation("ClientFiles")
   cashEntries      CashEntry[]
+  agendaEvents     AgendaEvent[]
 
   @@index([status])
   @@index([archivedAt])
@@ -549,19 +552,21 @@ enum FileStatus {
 }
 
 model FileAsset {
-  id           String              @id @default(cuid())
-  storageKey   String              @unique
-  originalName String
-  mimeType     String
-  extension    String
-  sizeBytes    BigInt
-  kind         FileKind
-  category     ClientFileCategory?
-  status       FileStatus          @default(PENDING)
-  uploadedById String
-  taskId       String?
-  clientId     String?
-  createdAt    DateTime            @default(now())
+  id             String              @id @default(cuid())
+  storageKey     String              @unique
+  originalName   String
+  mimeType       String
+  extension      String
+  sizeBytes      BigInt
+  kind           FileKind
+  category       ClientFileCategory?
+  status         FileStatus          @default(PENDING)
+  uploadedById   String
+  taskId         String?
+  clientId       String?
+  // Extrato bancário do financeiro: primeiro dia do mês de referência (só quem acessa o financeiro vê).
+  statementMonth DateTime?
+  createdAt      DateTime            @default(now())
 
   uploadedBy User    @relation(fields: [uploadedById], references: [id])
   task       Task?   @relation("TaskFiles", fields: [taskId], references: [id], onDelete: Cascade)
@@ -570,6 +575,7 @@ model FileAsset {
 
   @@index([taskId])
   @@index([clientId])
+  @@index([statementMonth])
   @@index([status, createdAt])
 }
 
@@ -603,4 +609,41 @@ model Notification {
   task  Task? @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@index([userId, readAt, createdAt])
+}
+
+// ──────────────────────────── Eventos da agenda ────────────────────────────
+
+// Compromissos com horário (reuniões, gravações, calls), distintos dos prazos das tarefas.
+// Sem cliente: visível para toda a equipe. Com cliente: segue o acesso ao cliente.
+model AgendaEvent {
+  id          String    @id @default(cuid())
+  title       String
+  startsAt    DateTime
+  endsAt      DateTime?
+  // Dia inteiro: startsAt guarda a data às 12:00 UTC (mesma convenção das datas puras).
+  allDay      Boolean   @default(false)
+  location    String?
+  notes       String?
+  clientId    String?
+  createdById String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  client    Client?               @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  createdBy User                  @relation(fields: [createdById], references: [id])
+  attendees AgendaEventAttendee[]
+
+  @@index([startsAt])
+  @@index([clientId])
+}
+
+model AgendaEventAttendee {
+  eventId String
+  userId  String
+
+  event AgendaEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, userId])
+  @@index([userId])
 }

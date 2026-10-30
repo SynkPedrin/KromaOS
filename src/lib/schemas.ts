@@ -265,6 +265,8 @@ export const uploadRequestSchema = z.object({
     // Arquivos do cliente são organizados por categoria (padrão: documentos).
     z.object({ type: z.literal("client"), id, category: z.enum(ClientFileCategory).optional() }),
     z.object({ type: z.literal("clientLogo"), id }),
+    // Extrato bancário (PDF) do mês, no financeiro.
+    z.object({ type: z.literal("statement"), month: z.string().regex(/^\d{4}-\d{2}$/) }),
   ]),
 });
 export type UploadTarget = z.infer<typeof uploadRequestSchema>["target"];
@@ -285,3 +287,26 @@ export const clientBrandSchema = z.object({
   brandFonts: optionalText(300),
 });
 export type ClientBrandInput = z.input<typeof clientBrandSchema>;
+
+// ─────────────────────────── Eventos da agenda ───────────────────────────
+
+const isoInstant = z.string().datetime({ offset: true });
+
+/** O navegador converte dia + horário (fuso local) em instantes ISO; dia inteiro usa a data às 12:00 UTC. */
+export const agendaEventSchema = z
+  .object({
+    title: trimmed(200).min(1, "Informe o título"),
+    startsAt: isoInstant,
+    endsAt: isoInstant.nullable().optional(),
+    allDay: z.boolean().default(false),
+    clientId: id.nullable().optional(),
+    attendeeIds: z.array(id).max(50).default([]),
+    location: trimmed(300).nullable().optional(),
+    notes: trimmed(2000).nullable().optional(),
+  })
+  .refine((d) => !d.endsAt || new Date(d.endsAt) >= new Date(d.startsAt), { message: "O fim precisa ser depois do início", path: ["endsAt"] })
+  .refine((d) => !d.endsAt || new Date(d.endsAt).getTime() - new Date(d.startsAt).getTime() <= 31 * 86_400_000, {
+    message: "Um evento pode durar no máximo 31 dias",
+    path: ["endsAt"],
+  });
+export type AgendaEventInput = z.input<typeof agendaEventSchema>;

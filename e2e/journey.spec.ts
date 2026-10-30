@@ -9,7 +9,8 @@ const PNG_1PX = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
   "base64",
 );
-const MP4 =Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypmp42"), Buffer.alloc(64)]);
+const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypmp42"), Buffer.alloc(64)]);
+const PDF = Buffer.from("%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF");
 let clientUrl = "";
 let inviteUrl = "";
 
@@ -124,6 +125,58 @@ test("entradas e saídas: cobrança paga entra no caixa e o saldo fecha", async 
   await expect(page.getByText("Saída registrada.")).toBeVisible();
   await expect(balance).toContainText("R$ 2.200,00");
   await expect(balance).toContainText("R$ 1.700,00");
+});
+
+test("extrato do banco em PDF anexado em entradas e saídas", async ({ page }) => {
+  await login(page);
+  await page.goto("/financeiro?tab=caixa");
+  const section = page.getByRole("region", { name: /Extratos de/ });
+  await section.locator('input[type="file"]').setInputFiles({ name: "Extrato Inter.pdf", mimeType: "application/pdf", buffer: PDF });
+  // O item entra na lista quando o envio é confirmado no servidor.
+  await expect(section.getByRole("button", { name: "Visualizar Extrato Inter.pdf" })).toBeVisible();
+  await page.reload();
+  await page.getByRole("region", { name: /Extratos de/ }).getByRole("button", { name: "Visualizar Extrato Inter.pdf" }).click();
+  await expect(page.getByRole("dialog", { name: "Extrato Inter.pdf" }).locator("iframe")).toBeAttached();
+});
+
+test("calendário: cria, edita e exclui evento com horário", async ({ page }) => {
+  await login(page);
+  await page.goto("/calendario?date=2030-11-01");
+  await page.getByRole("button", { name: "Novo evento" }).click();
+  await page.fill("#ev-title", "Gravação Aurora");
+  await page.fill("#ev-date", "2030-11-14");
+  await page.fill("#ev-start", "14:00");
+  await page.fill("#ev-end", "16:00");
+  await page.selectOption("#ev-client", { label: "Padaria Aurora" });
+  await page.fill("#ev-location", "Estúdio KROMA");
+  await page.getByRole("button", { name: "Criar evento" }).click();
+  await expect(page.getByText("Evento criado.")).toBeVisible();
+  const chip = page.locator('[title^="Evento: Gravação Aurora — 14:00–16:00"]:visible');
+  await expect(chip).toHaveCount(1);
+
+  // Editar
+  await chip.click();
+  await page.fill("#ev-title", "Gravação Aurora (externa)");
+  await page.getByRole("button", { name: "Salvar" }).click();
+  await expect(page.getByText("Evento atualizado.")).toBeVisible();
+  await expect(page.locator('[title^="Evento: Gravação Aurora (externa)"]:visible')).toHaveCount(1);
+
+  // Criar pelo "+" do dia, já com a data
+  const day = page.getByLabel(/quinta-feira, 21 de novembro/);
+  await day.hover();
+  await day.getByRole("button", { name: /Adicionar em 21 de novembro/ }).click();
+  await page.getByRole("menuitem", { name: /Evento em 21 de novembro/ }).click();
+  await expect(page.locator("#ev-date")).toHaveValue("2030-11-21");
+  await page.fill("#ev-title", "Reunião mensal");
+  await page.getByRole("button", { name: "Criar evento" }).click();
+  await expect(day.locator('[title^="Evento: Reunião mensal — 09:00–10:00"]')).toHaveCount(1);
+
+  // Excluir
+  await page.locator('[title^="Evento: Gravação Aurora (externa)"]:visible').click();
+  await page.getByRole("button", { name: "Excluir" }).click();
+  await page.getByRole("dialog", { name: "Excluir evento?" }).getByRole("button", { name: "Excluir" }).click();
+  await expect(page.getByText("Evento excluído.")).toBeVisible();
+  await expect(page.locator('[title^="Evento: Gravação Aurora"]:visible')).toHaveCount(0);
 });
 
 test("convida membro e aceita o convite", async ({ page }) => {

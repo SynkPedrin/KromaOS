@@ -2,12 +2,13 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { db } from "@/server/db";
 import { env } from "@/server/env";
-import { canManageClients, clientScope, type Actor } from "@/server/auth/permissions";
+import { assertFinance, canManageClients, clientScope, type Actor } from "@/server/auth/permissions";
 import { forbidden, invalid, notFound } from "@/server/errors";
 import { storage } from "@/server/storage";
 import { extensionOf, FILE_TYPES, matchesSignature } from "@/lib/file-types";
 import { uploadRequestSchema, type UploadTarget } from "@/lib/schemas";
 import { formatBytes } from "@/lib/format";
+import { dateOnly } from "@/lib/dates";
 import { z } from "zod";
 import { ClientFileCategory, type FileKind } from "@/generated/prisma/enums";
 import { logActivity, toNumber, userPublic } from "./shared";
@@ -25,6 +26,7 @@ export function uploadLimits(): Record<FileKind, number> {
 }
 
 async function assertTargetAccess(actor: Actor, target: UploadTarget) {
+  if (target.type === "statement") return assertFinance(actor);
   if (target.type === "task") {
     const t = await getVisibleTask(actor, target.id);
     if (t.archivedAt) throw invalid("A tarefa está arquivada.");
@@ -52,13 +54,16 @@ export async function requestUpload(actor: Actor, input: { filename: string; siz
   const { mime, kind } = FILE_TYPES[ext];
   const category = targetCategory(data.target);
   if (category === "LOGO" && kind !== "IMAGE") throw invalid("O logo precisa ser uma imagem (PNG, JPG ou WEBP).");
+  if (data.target.type === "statement" && ext !== "pdf") throw invalid("O extrato precisa ser um PDF.");
   const max = uploadLimits()[kind];
   if (data.sizeBytes > max) throw invalid(`Arquivo acima do limite de ${formatBytes(max)} para este tipo.`);
 
   await assertTargetAccess(actor, data.target);
 
   // O nome legível no fim da chave vira o nome do download nos storages que o derivam da chave.
-  const storageKey = `${data.target.type === "task" ? "tasks" : "clients"}/${data.target.id}/${randomUUID()}/${safeBaseName(data.filename)}.${ext}`;
+  const t = data.target;
+  const folder = t.type === "statement" ? `finance/statements/${t.month}` : `${t.type === "task" ? "tasks" : "clients"}/${t.id}`;
+  const storageKey = `${folder}/${randomUUID()}/${safeBaseName(data.filename)}.${ext}`;
   const file = await db.fileAsset.create({
     data: {
       storageKey,
@@ -70,8 +75,9 @@ export async function requestUpload(actor: Actor, input: { filename: string; siz
       category,
       status: "PENDING",
       uploadedById: actor.id,
-      taskId: data.target.type === "task" ? data.target.id : null,
-      clientId: data.target.type !== "task" ? data.target.id : null,
+      taskId: t.type === "task" ? t.id : null,
+      clientId: t.type === "client" || t.type === "clientLogo" ? t.id : null,
+      statementMonth: t.type === "statement" ? dateOnly(`${t.month}-01`) : null,
     },
   });
   const uploadUrl = await storage().uploadUrl(storageKey, mime, data.sizeBytes);
@@ -136,6 +142,11 @@ async function visibleFile(actor: Actor, fileId: string) {
   else if (file.clientId) {
     const ok = await db.client.count({ where: { AND: [{ id: file.clientId }, clientScope(actor)] } });
     if (!ok) throw notFound("Arquivo");
+  } else if (file.statementMonth) {
+    assertFinance(actor);
+  } else {
+    // Arquivo sem dono conhecido nunca é entregue.
+    throw notFound("Arquivo");
   }
   return file;
 }
@@ -225,6 +236,17 @@ export async function changeFileCategory(actor: Actor, fileId: string, input: Cl
   const isMain = await db.client.count({ where: { logoFileId: file.id } });
   if (isMain && category !== "LOGO") throw invalid("Este é o logo principal. Defina outro logo principal antes de movê-lo.");
   await db.fileAsset.update({ where: { id: file.id }, data: { category } });
+}
+
+/** Extratos bancários (PDF) de um mês, no financeiro. */
+export async function listStatementFiles(actor: Actor, month: string) {
+  assertFinance(actor);
+  const files = await db.fileAsset.findMany({
+    where: { status: "READY", statementMonth: dateOnly(`${month}-01`) },
+    orderBy: { createdAt: "desc" },
+    include: { uploadedBy: { select: userPublic } },
+  });
+  return files.map(serialize);
 }
 
 /** Limpeza de envios abandonados (registros PENDING com mais de 1 dia). */

@@ -4,7 +4,7 @@ import type { Role } from "@/generated/prisma/enums";
 
 const TABLES = [
   "Notification", "TimeEntry", "TaskActivity", "TaskComment", "ChecklistItem", "ContentApproval",
-  "ContentMetadata", "FileAsset", "Task", "CashEntry", "FinanceSettings", "Invoice", "MediaInvestment", "ClientContract", "ClientMember",
+  "AgendaEventAttendee", "AgendaEvent", "ContentMetadata", "FileAsset", "Task", "CashEntry", "FinanceSettings", "Invoice", "MediaInvestment", "ClientContract", "ClientMember",
   "ClientService", "Client", "Invitation", "Session", "RateLimit", "User",
 ];
 

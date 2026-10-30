@@ -1,6 +1,13 @@
 "use client";
 
-import { useMemo, useState, useSyncExternalStore, useTransition } from "react";
+import {
+  createContext,
+  useContext,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+} from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   DndContext,
@@ -19,30 +26,129 @@ import { CSS } from "@dnd-kit/utilities";
 import { format, isSameMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { motion } from "motion/react";
-import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock, Loader2, Send } from "lucide-react";
+import {
+  CalendarClock,
+  CalendarDays,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
+  Clock,
+  Loader2,
+  Plus,
+  Send,
+} from "lucide-react";
 import { toast } from "sonner";
-import type { CalendarEvent } from "@/server/services/calendar";
+import type {
+  AgendaCalendarEvent,
+  CalendarEvent,
+  TaskCalendarEvent,
+} from "@/server/services/calendar";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/display";
 import { Select } from "@/components/ui/form-controls";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/primitives";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/primitives";
 import { useApp } from "@/components/app/app-context";
 import { APPROVAL_STATUS, TASK_STATUS, TASK_TYPE } from "@/lib/labels";
 import { cn } from "@/lib/utils";
-import { rescheduleAction } from "@/app/actions/tasks";
-import type { ApprovalStatus, TaskStatus, TaskType } from "@/generated/prisma/enums";
-import { WEEKDAYS, movePublishInstant, parseAnchor, rangeTitle, shiftAnchor, visibleDays, ymd, type CalendarView } from "./calendar-utils";
+import { moveAgendaEventAction, rescheduleAction } from "@/app/actions/tasks";
+import type {
+  ApprovalStatus,
+  TaskStatus,
+  TaskType,
+} from "@/generated/prisma/enums";
+import {
+  WEEKDAYS,
+  movePublishInstant,
+  parseAnchor,
+  rangeTitle,
+  shiftAnchor,
+  visibleDays,
+  ymd,
+  type CalendarView,
+} from "./calendar-utils";
+import { EventDialog, type EventDialogState } from "./event-dialog";
 
 const MAX_IN_CELL = 3;
 const noopSubscribe = () => () => {};
 
+/** Ações do calendário disponíveis para células e itens (abrir item, criar no dia). */
+const CalendarActions = createContext<{
+  openItem: (e: CalendarEvent) => void;
+  createOn: (day: string) => void;
+  clientId: string;
+}>({
+  openItem: () => {},
+  createOn: () => {},
+  clientId: "",
+});
+
 /** Status exibido: para publicações, o status de aprovação; para prazos, o da tarefa. */
-function statusOf(e: CalendarEvent) {
-  if (e.kind === "publish" && e.approvalStatus) return APPROVAL_STATUS[e.approvalStatus as ApprovalStatus];
+function statusOf(e: TaskCalendarEvent) {
+  if (e.kind === "publish" && e.approvalStatus)
+    return APPROVAL_STATUS[e.approvalStatus as ApprovalStatus];
   return TASK_STATUS[e.status as TaskStatus];
 }
 
-function EventChip({ event, compact, dragging }: { event: CalendarEvent; compact?: boolean; dragging?: boolean }) {
+function AgendaChip({
+  event,
+  compact,
+  dragging,
+}: {
+  event: AgendaCalendarEvent;
+  compact?: boolean;
+  dragging?: boolean;
+}) {
+  const time = event.allDay
+    ? "Dia todo"
+    : `${format(new Date(event.date), "HH:mm")}${event.endsAt ? `–${format(new Date(event.endsAt), "HH:mm")}` : ""}`;
+  const label = `Evento: ${event.title} — ${time}${event.client ? ` — ${event.client.name}` : ""}${event.location ? ` — ${event.location}` : ""}`;
+  return (
+    <div
+      className={cn(
+        "w-full rounded-lg bg-[#1b1525] px-2 py-1 text-left text-[11.5px] leading-tight text-white shadow-[0_2px_10px_rgba(27,21,37,0.25)] transition-shadow",
+        dragging && "rotate-[1.5deg] shadow-[var(--shadow-lift)]",
+      )}
+      title={label}
+    >
+      <span className="flex items-center gap-1 font-semibold">
+        <CalendarClock className="size-3 shrink-0 text-lime" aria-hidden />
+        <span className="shrink-0 tabular text-lime">
+          {event.allDay ? "Dia todo" : format(new Date(event.date), "HH:mm")}
+        </span>
+        <span className="truncate">{event.title}</span>
+      </span>
+      {!compact && (
+        <span className="mt-0.5 block truncate text-[10.5px] text-white/70">
+          {[event.client?.name ?? "Interno", event.location]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+      )}
+      <span className="sr-only">{label}</span>
+    </div>
+  );
+}
+
+function EventChip({
+  event,
+  compact,
+  dragging,
+}: {
+  event: CalendarEvent;
+  compact?: boolean;
+  dragging?: boolean;
+}) {
+  if (event.kind === "event")
+    return <AgendaChip event={event} compact={compact} dragging={dragging} />;
   const publish = event.kind === "publish";
   const published = publish && event.approvalStatus === "PUBLISHED";
   const done = !publish && event.status === "DONE";
@@ -67,13 +173,28 @@ function EventChip({ event, compact, dragging }: { event: CalendarEvent; compact
       <span className="flex items-center gap-1 font-semibold">
         <Icon className="size-3 shrink-0" aria-hidden />
         {time && <span className="shrink-0 tabular opacity-80">{time}</span>}
-        <span className={cn("truncate", done && "line-through")}>{event.title}</span>
+        <span className={cn("truncate", done && "line-through")}>
+          {event.title}
+        </span>
       </span>
       {!compact && (
-        <span className={cn("mt-0.5 flex items-center gap-1 truncate text-[10.5px]", publish ? "opacity-85" : "text-ink-3")}>
-          {!publish && <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: status.color }} aria-hidden />}
+        <span
+          className={cn(
+            "mt-0.5 flex items-center gap-1 truncate text-[10.5px]",
+            publish ? "opacity-85" : "text-ink-3",
+          )}
+        >
+          {!publish && (
+            <span
+              className="size-1.5 shrink-0 rounded-full"
+              style={{ backgroundColor: status.color }}
+              aria-hidden
+            />
+          )}
           <span className="truncate">
-            {event.client?.name ?? "Interno"} · {TASK_TYPE[event.type as TaskType]?.label ?? event.type} · {status.label}
+            {event.client?.name ?? "Interno"} ·{" "}
+            {TASK_TYPE[event.type as TaskType]?.label ?? event.type} ·{" "}
+            {status.label}
           </span>
         </span>
       )}
@@ -82,16 +203,31 @@ function EventChip({ event, compact, dragging }: { event: CalendarEvent; compact
   );
 }
 
-function DraggableEvent({ event, compact }: { event: CalendarEvent; compact?: boolean }) {
-  const { openTask } = useApp();
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: event.key, data: { event } });
+function DraggableEvent({
+  event,
+  compact,
+}: {
+  event: CalendarEvent;
+  compact?: boolean;
+}) {
+  const { openItem } = useContext(CalendarActions);
+  // Eventos de outra pessoa (sem permissão de edição) não são arrastáveis.
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
+    useDraggable({
+      id: event.key,
+      data: { event },
+      disabled: event.kind === "event" && !event.canEdit,
+    });
   return (
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform) }}
-      className={cn("touch-manipulation cursor-pointer", isDragging && "opacity-30")}
-      onClick={() => openTask(event.taskId)}
-      onKeyDown={(e) => e.key === "Enter" && openTask(event.taskId)}
+      className={cn(
+        "touch-manipulation cursor-pointer",
+        isDragging && "opacity-30",
+      )}
+      onClick={() => openItem(event)}
+      onKeyDown={(e) => e.key === "Enter" && openItem(event)}
       {...attributes}
       {...listeners}
     >
@@ -100,10 +236,24 @@ function DraggableEvent({ event, compact }: { event: CalendarEvent; compact?: bo
   );
 }
 
-function DayCell({ day, events, inMonth, today, view, index }: { day: Date; events: CalendarEvent[]; inMonth: boolean; today: string; view: CalendarView; index: number }) {
+function DayCell({
+  day,
+  events,
+  inMonth,
+  today,
+  view,
+  index,
+}: {
+  day: Date;
+  events: CalendarEvent[];
+  inMonth: boolean;
+  today: string;
+  view: CalendarView;
+  index: number;
+}) {
   const key = ymd(day);
   const { setNodeRef, isOver } = useDroppable({ id: key });
-  const { openTask } = useApp();
+  const { openItem } = useContext(CalendarActions);
   const isToday = key === today;
   const shown = view === "month" ? events.slice(0, MAX_IN_CELL) : events;
   const extra = events.length - shown.length;
@@ -114,7 +264,7 @@ function DayCell({ day, events, inMonth, today, view, index }: { day: Date; even
       animate={{ opacity: 1 }}
       transition={{ delay: Math.min(index, 34) * 0.008, duration: 0.3 }}
       className={cn(
-        "flex min-w-0 flex-col gap-1 border-b border-r border-hairline p-1.5 transition-colors",
+        "group/day flex min-w-0 flex-col gap-1 border-b border-r border-hairline p-1.5 transition-colors",
         view === "month" ? "min-h-[118px]" : "min-h-[420px]",
         !inMonth && "bg-black/[0.015]",
         isOver && "bg-purple-50/80 ring-2 ring-inset ring-purple/25",
@@ -122,11 +272,23 @@ function DayCell({ day, events, inMonth, today, view, index }: { day: Date; even
       aria-label={format(day, "EEEE, d 'de' MMMM", { locale: ptBR })}
     >
       <div className="flex items-center justify-between px-0.5">
-        {view === "week" && <span className="text-[11px] font-bold uppercase text-ink-3">{WEEKDAYS[day.getDay()]}</span>}
+        <AddOnDay
+          day={key}
+          className="opacity-40 focus-visible:opacity-100 group-hover/day:opacity-100 data-[state=open]:opacity-100"
+        />
+        {view === "week" && (
+          <span className="ml-1 text-[11px] font-bold uppercase text-ink-3">
+            {WEEKDAYS[day.getDay()]}
+          </span>
+        )}
         <span
           className={cn(
             "ml-auto flex size-6 items-center justify-center rounded-full text-xs font-bold tabular",
-            isToday ? "bg-purple text-white shadow-[0_2px_8px_rgba(118,37,245,0.35)]" : inMonth ? "text-ink-2" : "text-ink-3/60",
+            isToday
+              ? "bg-purple text-white shadow-[0_2px_8px_rgba(118,37,245,0.35)]"
+              : inMonth
+                ? "text-ink-2"
+                : "text-ink-3/60",
           )}
         >
           {day.getDate()}
@@ -137,11 +299,19 @@ function DayCell({ day, events, inMonth, today, view, index }: { day: Date; even
       ))}
       {extra > 0 && (
         <Popover>
-          <PopoverTrigger className="rounded-md px-1.5 py-0.5 text-left text-[11px] font-semibold text-purple hover:bg-purple-50">+{extra} mais</PopoverTrigger>
+          <PopoverTrigger className="rounded-md px-1.5 py-0.5 text-left text-[11px] font-semibold text-purple hover:bg-purple-50">
+            +{extra} mais
+          </PopoverTrigger>
           <PopoverContent className="w-64 space-y-1 p-2">
-            <p className="px-1 pb-1 text-xs font-bold text-ink-2">{format(day, "EEEE, d 'de' MMMM", { locale: ptBR })}</p>
+            <p className="px-1 pb-1 text-xs font-bold text-ink-2">
+              {format(day, "EEEE, d 'de' MMMM", { locale: ptBR })}
+            </p>
             {events.map((e) => (
-              <button key={e.key} onClick={() => openTask(e.taskId)} className="block w-full">
+              <button
+                key={e.key}
+                onClick={() => openItem(e)}
+                className="block w-full"
+              >
                 <EventChip event={e} />
               </button>
             ))}
@@ -152,38 +322,129 @@ function DayCell({ day, events, inMonth, today, view, index }: { day: Date; even
   );
 }
 
+/** "+" do dia: cria um evento ou uma tarefa já com essa data. */
+function AddOnDay({ day, className }: { day: string; className?: string }) {
+  const { createOn, clientId } = useContext(CalendarActions);
+  const { openQuickTask } = useApp();
+  const label = format(parseAnchor(day), "d 'de' MMMM", { locale: ptBR });
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={`Adicionar em ${label}`}
+        className={cn(
+          "flex size-6 items-center justify-center rounded-full text-ink-3 transition-opacity hover:bg-purple-50 hover:text-purple",
+          className,
+        )}
+      >
+        <Plus className="size-3.5" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        <DropdownMenuItem onSelect={() => createOn(day)}>
+          <CalendarClock /> Evento em {label}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() =>
+            openQuickTask({ dueDate: day, ...(clientId ? { clientId } : {}) })
+          }
+        >
+          <ClipboardList /> Tarefa com prazo em {label}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 /** Lista por dia — usada no celular (mês e semana) para evitar rolagem horizontal. */
-function AgendaList({ days, byDay, today, view }: { days: Date[]; byDay: Map<string, CalendarEvent[]>; today: string; view: CalendarView }) {
-  const visible = view === "week" ? days : days.filter((d) => (byDay.get(ymd(d))?.length ?? 0) > 0);
-  if (!visible.length) return <EmptyState icon={<CalendarDays />} title="Nada agendado neste período" description="Prazos e publicações aparecem aqui." />;
+function AgendaList({
+  days,
+  byDay,
+  today,
+  view,
+}: {
+  days: Date[];
+  byDay: Map<string, CalendarEvent[]>;
+  today: string;
+  view: CalendarView;
+}) {
+  const visible =
+    view === "week"
+      ? days
+      : days.filter((d) => (byDay.get(ymd(d))?.length ?? 0) > 0);
+  if (!visible.length)
+    return (
+      <EmptyState
+        icon={<CalendarDays />}
+        title="Nada agendado neste período"
+        description="Eventos, prazos e publicações aparecem aqui. Use “Novo evento” para criar."
+      />
+    );
   return (
     <ol className="divide-y divide-hairline">
       {visible.map((d) => (
-        <AgendaDay key={ymd(d)} day={d} events={byDay.get(ymd(d)) ?? []} today={today} />
+        <AgendaDay
+          key={ymd(d)}
+          day={d}
+          events={byDay.get(ymd(d)) ?? []}
+          today={today}
+        />
       ))}
     </ol>
   );
 }
 
-function AgendaDay({ day, events, today }: { day: Date; events: CalendarEvent[]; today: string }) {
+function AgendaDay({
+  day,
+  events,
+  today,
+}: {
+  day: Date;
+  events: CalendarEvent[];
+  today: string;
+}) {
   const key = ymd(day);
   const { setNodeRef, isOver } = useDroppable({ id: `agenda:${key}` });
   return (
-    <li ref={setNodeRef} className={cn("flex gap-3 px-3 py-3", isOver && "bg-purple-50/70")}>
-      <div className={cn("flex w-11 shrink-0 flex-col items-center rounded-xl py-1", key === today ? "bg-purple text-white" : "bg-white/70 ring-1 ring-hairline")}>
-        <span className="text-[10px] font-bold uppercase opacity-80">{WEEKDAYS[day.getDay()]}</span>
+    <li
+      ref={setNodeRef}
+      className={cn("flex gap-3 px-3 py-3", isOver && "bg-purple-50/70")}
+    >
+      <div
+        className={cn(
+          "flex w-11 shrink-0 flex-col items-center rounded-xl py-1",
+          key === today
+            ? "bg-purple text-white"
+            : "bg-white/70 ring-1 ring-hairline",
+        )}
+      >
+        <span className="text-[10px] font-bold uppercase opacity-80">
+          {WEEKDAYS[day.getDay()]}
+        </span>
         <span className="text-base font-bold tabular">{day.getDate()}</span>
       </div>
       <div className="min-w-0 flex-1 space-y-1.5">
-        {events.length ? events.map((e) => <DraggableEvent key={e.key} event={e} />) : <p className="py-2 text-xs text-ink-3">Sem eventos</p>}
+        {events.length ? (
+          events.map((e) => <DraggableEvent key={e.key} event={e} />)
+        ) : (
+          <p className="py-2 text-xs text-ink-3">Sem eventos</p>
+        )}
       </div>
+      <AddOnDay day={key} className="mt-1 shrink-0" />
     </li>
   );
 }
 
 export function CalendarLegend() {
   return (
-    <ul className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-ink-2" aria-label="Legenda">
+    <ul
+      className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-ink-2"
+      aria-label="Legenda"
+    >
+      <li className="flex items-center gap-2">
+        <span className="inline-flex items-center gap-1 rounded-md bg-[#1b1525] px-1.5 py-0.5 font-semibold text-white">
+          <CalendarClock className="size-3 text-lime" /> Evento
+        </span>
+        reunião, gravação ou call com horário
+      </li>
       <li className="flex items-center gap-2">
         <span className="inline-flex items-center gap-1 rounded-md border border-dashed border-ink-3/50 bg-white px-1.5 py-0.5 font-semibold text-ink">
           <Clock className="size-3" /> Prazo
@@ -205,7 +466,17 @@ export function CalendarLegend() {
   );
 }
 
-export function CalendarBoard({ events: initial, view, anchor, clientId }: { events: CalendarEvent[]; view: CalendarView; anchor: string; clientId: string }) {
+export function CalendarBoard({
+  events: initial,
+  view,
+  anchor,
+  clientId,
+}: {
+  events: CalendarEvent[];
+  view: CalendarView;
+  anchor: string;
+  clientId: string;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -214,16 +485,37 @@ export function CalendarBoard({ events: initial, view, anchor, clientId }: { eve
   const [events, setEvents] = useState(initial);
   const [source, setSource] = useState(initial);
   const [active, setActive] = useState<CalendarEvent | null>(null);
+  const [dialog, setDialog] = useState<EventDialogState>(null);
+  const { openTask } = useApp();
+  const actions = useMemo(
+    () => ({
+      openItem: (e: CalendarEvent) =>
+        e.kind === "event"
+          ? setDialog({ mode: "edit", event: e })
+          : openTask(e.taskId),
+      createOn: (day: string) =>
+        setDialog({ mode: "new", date: day, clientId: clientId || undefined }),
+      clientId,
+    }),
+    [openTask, clientId],
+  );
   // Novos dados do servidor substituem o estado otimista local.
   if (source !== initial) {
     setSource(initial);
     setEvents(initial);
   }
   // "Hoje" no fuso do navegador (o servidor pode estar em UTC); vazio durante o SSR.
-  const today = useSyncExternalStore(noopSubscribe, () => ymd(new Date()), () => "");
+  const today = useSyncExternalStore(
+    noopSubscribe,
+    () => ymd(new Date()),
+    () => "",
+  );
 
   const anchorDate = parseAnchor(anchor);
-  const days = useMemo(() => visibleDays(parseAnchor(anchor), view), [anchor, view]);
+  const days = useMemo(
+    () => visibleDays(parseAnchor(anchor), view),
+    [anchor, view],
+  );
 
   const byDay = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
@@ -231,8 +523,11 @@ export function CalendarBoard({ events: initial, view, anchor, clientId }: { eve
       const k = ymd(new Date(e.date));
       map.set(k, [...(map.get(k) ?? []), e]);
     }
-    // Publicações por horário; prazos depois.
-    for (const list of map.values()) list.sort((a, b) => (a.kind === b.kind ? a.date.localeCompare(b.date) : a.kind === "publish" ? -1 : 1));
+    // Eventos de dia inteiro primeiro; depois eventos e publicações por horário; prazos por último.
+    const rank = (e: CalendarEvent) =>
+      e.kind === "event" && e.allDay ? 0 : e.kind === "due" ? 2 : 1;
+    for (const list of map.values())
+      list.sort((a, b) => rank(a) - rank(b) || a.date.localeCompare(b.date));
     return map;
   }, [events]);
 
@@ -248,7 +543,9 @@ export function CalendarBoard({ events: initial, view, anchor, clientId }: { eve
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 200, tolerance: 6 },
+    }),
     useSensor(KeyboardSensor),
   );
 
@@ -258,101 +555,211 @@ export function CalendarBoard({ events: initial, view, anchor, clientId }: { eve
     const over = e.over?.id ? String(e.over.id).replace(/^agenda:/, "") : null;
     if (!ev || !over || ymd(new Date(ev.date)) === over) return;
     const before = events;
-    const input = ev.kind === "due" ? ({ kind: "due", date: over } as const) : ({ kind: "publish", at: movePublishInstant(ev.date, over) } as const);
+    if (ev.kind === "event") {
+      // Mantém o horário local (ou a convenção de dia inteiro) e a duração.
+      const startsAt = ev.allDay
+        ? `${over}T12:00:00.000Z`
+        : movePublishInstant(ev.date, over);
+      const delta = new Date(startsAt).getTime() - new Date(ev.date).getTime();
+      const endsAt = ev.endsAt
+        ? new Date(new Date(ev.endsAt).getTime() + delta).toISOString()
+        : null;
+      setEvents((prev) =>
+        prev.map((x) =>
+          x.key === ev.key ? { ...ev, date: startsAt, endsAt } : x,
+        ),
+      );
+      const r = await moveAgendaEventAction(ev.eventId, startsAt);
+      if (!r.ok) {
+        setEvents(before);
+        toast.error(r.error);
+      } else
+        toast.success(
+          `Evento movido para ${format(parseAnchor(over), "d 'de' MMM", { locale: ptBR })}.`,
+        );
+      return;
+    }
+    const input =
+      ev.kind === "due"
+        ? ({ kind: "due", date: over } as const)
+        : ({ kind: "publish", at: movePublishInstant(ev.date, over) } as const);
     const newDate = input.kind === "due" ? `${over}T12:00:00.000Z` : input.at;
-    setEvents((prev) => prev.map((x) => (x.key === ev.key ? { ...x, date: newDate } : x)));
+    setEvents((prev) =>
+      prev.map((x) => (x.key === ev.key ? { ...x, date: newDate } : x)),
+    );
     const r = await rescheduleAction(ev.taskId, input);
     if (!r.ok) {
       setEvents(before);
       toast.error(r.error);
     } else {
-      toast.success(`${ev.kind === "due" ? "Prazo movido" : "Publicação movida"} para ${format(parseAnchor(over), "d 'de' MMM", { locale: ptBR })}.`);
+      toast.success(
+        `${ev.kind === "due" ? "Prazo movido" : "Publicação movida"} para ${format(parseAnchor(over), "d 'de' MMM", { locale: ptBR })}.`,
+      );
     }
   };
 
   const hasEvents = events.length > 0;
 
   return (
-    <DndContext
-      id="calendar-board"
-      sensors={sensors}
-      collisionDetection={pointerWithin}
-      onDragStart={(e) => setActive((e.active.data.current?.event as CalendarEvent) ?? null)}
-      onDragEnd={onDragEnd}
-      onDragCancel={() => setActive(null)}
-      accessibility={{ screenReaderInstructions: { draggable: "Pressione espaço para pegar o evento, use as setas para mover e espaço para soltar em outro dia." } }}
-    >
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1">
-          <Button variant="secondary" size="icon" onClick={() => nav({ date: ymd(shiftAnchor(anchorDate, view, -1)) })} aria-label="Período anterior">
-            <ChevronLeft />
-          </Button>
-          <Button variant="secondary" size="icon" onClick={() => nav({ date: ymd(shiftAnchor(anchorDate, view, 1)) })} aria-label="Próximo período">
-            <ChevronRight />
-          </Button>
-          <Button variant="secondary" onClick={() => nav({ date: null })}>
-            Hoje
-          </Button>
-        </div>
-        <h2 className="flex items-center gap-2 px-1 font-display text-lg font-medium tracking-tight">
-          {rangeTitle(anchorDate, view)}
-          {pending && <Loader2 className="size-4 animate-spin text-ink-3" />}
-        </h2>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Select value={clientId} onChange={(e) => nav({ client: e.target.value || null })} aria-label="Filtrar por cliente" className="w-[180px]">
-            <option value="">Todos os clientes</option>
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </Select>
-          <div className="flex rounded-xl bg-white/60 p-1 ring-1 ring-hairline" role="group" aria-label="Visualização">
-            {(
-              [
-                ["month", "Mês"],
-                ["week", "Semana"],
-              ] as const
-            ).map(([v, label]) => (
-              <button
-                key={v}
-                onClick={() => nav({ view: v === "month" ? null : v })}
-                aria-pressed={view === v}
-                className={cn("h-8 rounded-lg px-3 text-[13px] font-semibold transition-all", view === v ? "bg-white text-ink shadow-sm" : "text-ink-2 hover:text-ink")}
-              >
-                {label}
-              </button>
-            ))}
+    <CalendarActions.Provider value={actions}>
+      <DndContext
+        id="calendar-board"
+        sensors={sensors}
+        collisionDetection={pointerWithin}
+        onDragStart={(e) =>
+          setActive((e.active.data.current?.event as CalendarEvent) ?? null)
+        }
+        onDragEnd={onDragEnd}
+        onDragCancel={() => setActive(null)}
+        accessibility={{
+          screenReaderInstructions: {
+            draggable:
+              "Pressione espaço para pegar o evento, use as setas para mover e espaço para soltar em outro dia.",
+          },
+        }}
+      >
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1">
+            <Button
+              variant="secondary"
+              size="icon"
+              onClick={() =>
+                nav({ date: ymd(shiftAnchor(anchorDate, view, -1)) })
+              }
+              aria-label="Período anterior"
+            >
+              <ChevronLeft />
+            </Button>
+            <Button
+              variant="secondary"
+              size="icon"
+              onClick={() =>
+                nav({ date: ymd(shiftAnchor(anchorDate, view, 1)) })
+              }
+              aria-label="Próximo período"
+            >
+              <ChevronRight />
+            </Button>
+            <Button variant="secondary" onClick={() => nav({ date: null })}>
+              Hoje
+            </Button>
+          </div>
+          <h2 className="flex items-center gap-2 px-1 font-display text-lg font-medium tracking-tight">
+            {rangeTitle(anchorDate, view)}
+            {pending && <Loader2 className="size-4 animate-spin text-ink-3" />}
+          </h2>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <Button
+              onClick={() =>
+                setDialog({ mode: "new", clientId: clientId || undefined })
+              }
+            >
+              <Plus /> Novo evento
+            </Button>
+            <Select
+              value={clientId}
+              onChange={(e) => nav({ client: e.target.value || null })}
+              aria-label="Filtrar por cliente"
+              className="w-[180px]"
+            >
+              <option value="">Todos os clientes</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+            <div
+              className="flex rounded-xl bg-white/60 p-1 ring-1 ring-hairline"
+              role="group"
+              aria-label="Visualização"
+            >
+              {(
+                [
+                  ["month", "Mês"],
+                  ["week", "Semana"],
+                ] as const
+              ).map(([v, label]) => (
+                <button
+                  key={v}
+                  onClick={() => nav({ view: v === "month" ? null : v })}
+                  aria-pressed={view === v}
+                  className={cn(
+                    "h-8 rounded-lg px-3 text-[13px] font-semibold transition-all",
+                    view === v
+                      ? "bg-white text-ink shadow-sm"
+                      : "text-ink-2 hover:text-ink",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
-      <div className="mb-4">
-        <CalendarLegend />
-      </div>
+        <div className="mb-4">
+          <CalendarLegend />
+        </div>
 
-      {/* Desktop/tablet: grade */}
-      <div className="glass hidden overflow-hidden rounded-3xl md:block">
-        <div className="grid grid-cols-7 border-b border-hairline bg-white/40">
-          {WEEKDAYS.map((d) => (
-            <div key={d} className="px-2 py-2 text-center text-[11px] font-bold uppercase tracking-wider text-ink-3">
-              {view === "week" ? "" : d}
+        {/* Desktop/tablet: grade */}
+        <div className="glass hidden overflow-hidden rounded-3xl md:block">
+          <div className="grid grid-cols-7 border-b border-hairline bg-white/40">
+            {WEEKDAYS.map((d) => (
+              <div
+                key={d}
+                className="px-2 py-2 text-center text-[11px] font-bold uppercase tracking-wider text-ink-3"
+              >
+                {view === "week" ? "" : d}
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 [&>*:nth-child(7n)]:border-r-0">
+            {days.map((d, i) => (
+              <DayCell
+                key={ymd(d)}
+                day={d}
+                events={byDay.get(ymd(d)) ?? []}
+                inMonth={view === "week" || isSameMonth(d, anchorDate)}
+                today={today}
+                view={view}
+                index={i}
+              />
+            ))}
+          </div>
+          {!hasEvents && (
+            <p className="border-t border-hairline px-4 py-3 text-center text-xs text-ink-3">
+              Nada agendado neste período. Passe o mouse num dia e clique em +
+              para criar.
+            </p>
+          )}
+        </div>
+
+        {/* Celular: agenda */}
+        <div className="glass overflow-hidden rounded-3xl md:hidden">
+          <AgendaList
+            days={days.filter(
+              (d) => view === "week" || isSameMonth(d, anchorDate),
+            )}
+            byDay={byDay}
+            today={today}
+            view={view}
+          />
+        </div>
+
+        <DragOverlay
+          dropAnimation={{
+            duration: 160,
+            easing: "cubic-bezier(0.22,1,0.36,1)",
+          }}
+        >
+          {active ? (
+            <div className="w-48">
+              <EventChip event={active} dragging />
             </div>
-          ))}
-        </div>
-        <div className="grid grid-cols-7 [&>*:nth-child(7n)]:border-r-0">
-          {days.map((d, i) => (
-            <DayCell key={ymd(d)} day={d} events={byDay.get(ymd(d)) ?? []} inMonth={view === "week" || isSameMonth(d, anchorDate)} today={today} view={view} index={i} />
-          ))}
-        </div>
-        {!hasEvents && <p className="border-t border-hairline px-4 py-3 text-center text-xs text-ink-3">Nenhum prazo ou publicação neste período.</p>}
-      </div>
-
-      {/* Celular: agenda */}
-      <div className="glass overflow-hidden rounded-3xl md:hidden">
-        <AgendaList days={days.filter((d) => view === "week" || isSameMonth(d, anchorDate))} byDay={byDay} today={today} view={view} />
-      </div>
-
-      <DragOverlay dropAnimation={{ duration: 160, easing: "cubic-bezier(0.22,1,0.36,1)" }}>{active ? <div className="w-48"><EventChip event={active} dragging /></div> : null}</DragOverlay>
-    </DndContext>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+      <EventDialog state={dialog} onClose={() => setDialog(null)} />
+    </CalendarActions.Provider>
   );
 }

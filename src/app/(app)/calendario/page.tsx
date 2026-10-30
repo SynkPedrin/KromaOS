@@ -28,7 +28,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader title="Calendário" description="Prazos de entrega e datas de publicação. Arraste para reagendar." />
+      <PageHeader title="Calendário" description="Eventos, prazos de entrega e datas de publicação. Arraste para reagendar." />
       <CalendarBoard events={events} view={view} anchor={ymd(anchor)} clientId={clientId ?? ""} />
     </>
   );

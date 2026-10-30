@@ -33,7 +33,8 @@ PostgreSQL 15+ (desenvolvimento usa 17). Esquema em `prisma/schema.prisma`, migr
 | `TimeEntry` | Registros de tempo (timer ou manual). `endedAt` nulo = timer rodando |
 | `ContentMetadata` | Metadados do Studio (legenda, hashtags, CTA, plataformas, `publishAt`, aprovação, publicação) |
 | `ContentApproval` | Histórico de aprovações INTERNAL × CLIENT |
-| `FileAsset` | Metadados de arquivos (objeto fica no S3). Ligado a tarefa ou cliente |
+| `FileAsset` | Metadados de arquivos (objeto fica no storage). Ligado a tarefa, a cliente ou, com `statementMonth`, é um extrato bancário (PDF) do financeiro daquele mês. Arquivo sem dono conhecido nunca é entregue |
+| `AgendaEvent` / `AgendaEventAttendee` | Eventos do calendário com horário (reuniões, gravações, calls): início, fim opcional, dia inteiro (data às 12:00 UTC), local/link, observações, cliente opcional e participantes. Sem cliente: visível para toda a equipe; com cliente: segue o acesso ao cliente; convidados sempre veem. Edita/exclui quem criou ou um gestor |
 | `Notification` | Notificações internas (`dedupeKey` evita duplicatas da rotina diária) |
 
 ## Regras garantidas pelo banco
@@ -45,6 +46,8 @@ Além de chaves estrangeiras e índices, a migration inicial adiciona:
 - `pg_trgm` + índices GIN em `Task.title` e `Client.name` para a busca.
 - `CashEntry_amount_positive` — `CHECK` de valor positivo nos lançamentos (o sinal vem do tipo).
 - `CashEntry.invoiceId` único: no máximo uma entrada de caixa por cobrança.
+- `AgendaEvent_ends_after_start` — `CHECK` de fim depois do início.
+- `FileAsset_statement_owner` — `CHECK`: extrato não pertence a tarefa nem a cliente.
 
 ### Saldo em conta
 

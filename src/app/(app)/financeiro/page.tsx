@@ -14,6 +14,8 @@ import { InvoicesPanel, type InvoiceRow } from "@/components/finance/invoices-pa
 import { ContractsPanel, type ClientContractRow } from "@/components/finance/contracts-panel";
 import { MediaPanel, type MediaRow } from "@/components/finance/media-panel";
 import { CashPanel, type CashRow } from "@/components/finance/cash-panel";
+import type { FileItem } from "@/components/files/file-list";
+import { listStatementFiles } from "@/server/services/files";
 import { ymdInTz } from "@/lib/dates";
 import { INVOICE_STATUS } from "@/lib/labels";
 
@@ -64,10 +66,11 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
   } else if (tab === "caixa") {
     const type = sp.type === "INCOME" || sp.type === "EXPENSE" ? sp.type : undefined;
     const settled = sp.status === "realizado" ? true : sp.status === "previsto" ? false : undefined;
-    const [entries, summary, history] = await Promise.all([
+    const [entries, summary, history, statements] = await Promise.all([
       listCashEntries(user, { month, type, category: sp.category || undefined, settled }),
       cashSummary(user, month),
       cashHistory(user, 6, month),
+      listStatementFiles(user, month),
     ]);
     body = (
       <CashPanel
@@ -77,6 +80,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
         clients={clients}
         month={month}
         canEditOpening={isAdmin(user)}
+        statements={json(statements) as FileItem[]}
       />
     );
   } else if (tab === "recebimentos") {
