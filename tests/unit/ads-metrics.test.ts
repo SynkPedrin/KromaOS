@@ -172,5 +172,7 @@ describe("erros da Graph API", () => {
     expect(classifyMetaError(500, 2)).toBe("transient");
     expect(classifyMetaError(503)).toBe("transient");
     expect(classifyMetaError(400, 100)).toBe("invalid");
+    // A Meta às vezes devolve HTTP 500 com #100: é parâmetro inválido, não instabilidade.
+    expect(classifyMetaError(500, 100)).toBe("invalid");
   });
 });

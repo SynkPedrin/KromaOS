@@ -25,6 +25,7 @@ let calls: Call[] = [];
 let scopes = ["ads_read", "public_profile"];
 let tokenValid = true;
 let failWith: { code: number; subcode?: number } | null = null;
+let creativeBatchFails = false;
 
 const page = (data: unknown[], after?: string) => ({ data, paging: after ? { cursors: { after }, next: `https://graph.facebook.com/next?after=${after}` } : { cursors: {} } });
 
@@ -72,6 +73,12 @@ function fakeGraph(path: string, p: URLSearchParams) {
         { id: "ad2", name: "Carrossel", adset_id: "s2", campaign_id: "c2", status: "ACTIVE", effective_status: "CAMPAIGN_PAUSED", creative: { id: "cr2" } },
       ]),
     };
+  if (path === "" && p.get("ids") && creativeBatchFails) return { status: 500, body: { error: { message: "(#100) Invalid parameter", code: 100 } } };
+  if (/^cr\d$/.test(path)) {
+    // Consulta individual: o criativo cr2 só responde com os campos mínimos.
+    if (path === "cr2" && p.get("fields") !== "id,name,thumbnail_url") return { status: 400, body: { error: { message: "(#100) field", code: 100 } } };
+    return { status: 200, body: { id: path, name: `Criativo ${path}`, thumbnail_url: `https://scontent.xx.fbcdn.net/${path}.jpg` } };
+  }
   if (path === "" && p.get("ids"))
     return {
       status: 200,
@@ -124,6 +131,7 @@ beforeEach(async () => {
   scopes = ["ads_read", "public_profile"];
   tokenValid = true;
   failWith = null;
+  creativeBatchFails = false;
   vi.stubGlobal("fetch", async (input: string | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     const path = url.pathname.replace(/^\/v\d+\.\d+\/?/, "");
@@ -246,6 +254,20 @@ describe("sincronização", () => {
     const insight = calls.find((c) => c.path.endsWith("/insights") && c.params.get("level") === "ad");
     expect(insight?.params.get("time_increment")).toBe("1");
     expect(insight?.params.get("use_unified_attribution_setting")).toBe("true");
+  });
+
+  it("lote de criativos recusado (HTTP 500 com #100) não derruba a sincronização", async () => {
+    const { account } = await connectedSetup();
+    creativeBatchFails = true;
+    const r = await syncAdAccount(account.id, { kind: "RECENT" });
+    expect(r.status).toBe("SUCCESS");
+    expect(await db.metaAd.count()).toBe(2);
+    expect((await db.metaCreative.findMany({ orderBy: { externalId: "asc" } })).map((c) => c.thumbnailUrl)).toEqual([
+      "https://scontent.xx.fbcdn.net/cr1.jpg",
+      "https://scontent.xx.fbcdn.net/cr2.jpg",
+    ]);
+    // Um único pedido do lote (sem repetir 3x como se fosse instabilidade).
+    expect(calls.filter((c) => c.path === "" && c.params.get("ids")).length).toBe(1);
   });
 
   it("reprocessar o mesmo intervalo substitui as métricas (sem duplicar)", async () => {

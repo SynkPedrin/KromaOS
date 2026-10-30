@@ -29,7 +29,8 @@ export function classifyMetaError(status: number, code?: number, subcode?: numbe
   if (code === 190 || code === 102) return "auth";
   if (code !== undefined && (RATE_LIMIT_CODES.has(code) || (code >= 80000 && code <= 80099))) return "rate_limit";
   if (code === 10 || code === 3 || (code !== undefined && code >= 200 && code <= 299) || (code === 100 && subcode === 33)) return "permission";
-  if (code === 1 || code === 2 || status >= 500) return "transient";
+  // Código explícito prevalece sobre o HTTP: a Meta às vezes devolve 500 para parâmetro inválido (#100).
+  if (code === 1 || code === 2 || (code === undefined && status >= 500)) return "transient";
   return "invalid";
 }
 
@@ -94,7 +95,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function graphGet<T>(path: string, params: Params, token: string | null): Promise<T> {
   const auth = token === null ? {} : { access_token: token, appsecret_proof: token.includes("|") ? undefined : appSecretProof(token) };
   const url = buildUrl(path, { ...params, ...auth });
-  const label = path.split("?")[0];
+  const label = path.split("?")[0] || "(ids)";
 
   let lastError: MetaApiError | null = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -112,7 +113,10 @@ export async function graphGet<T>(path: string, params: Params, token: string | 
     const err = body?.error;
     const kind = classifyMetaError(res.status, err?.code, err?.error_subcode);
     lastError = new MetaApiError(err?.message ?? `HTTP ${res.status}`, kind, err?.code, err?.error_subcode, res.status);
-    console.warn(`[meta] GET ${label} falhou (tentativa ${attempt}): ${kind} code=${err?.code ?? "-"} subcode=${err?.error_subcode ?? "-"}`);
+    // A mensagem da Meta não contém o token; ajuda a diagnosticar campos ou parâmetros recusados.
+    console.warn(
+      `[meta] GET ${label} falhou (tentativa ${attempt}): ${kind} http=${res.status} code=${err?.code ?? "-"} subcode=${err?.error_subcode ?? "-"} msg=${(err?.message ?? "").slice(0, 200)}`,
+    );
     if ((kind === "transient" || kind === "rate_limit") && attempt < MAX_ATTEMPTS) {
       await sleep(BACKOFF_MS * (kind === "rate_limit" ? 4 : 1) * 2 ** (attempt - 1));
       continue;

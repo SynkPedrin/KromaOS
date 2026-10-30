@@ -24,6 +24,9 @@ const ADSET_FIELDS =
 const AD_FIELDS = "id,name,adset_id,campaign_id,status,effective_status,creative{id},preview_shareable_link,created_time,updated_time";
 const CREATIVE_FIELDS =
   "id,name,object_type,thumbnail_url,image_url,video_id,body,title,call_to_action_type,object_story_spec,asset_feed_spec,instagram_permalink_url,link_url";
+// Plano B por criativo quando o lote é recusado: menos campos, depois só a miniatura.
+const CREATIVE_FALLBACK_FIELDS = ["id,name,object_type,thumbnail_url,image_url,video_id,body,title,call_to_action_type,object_story_spec", "id,name,thumbnail_url"];
+const THUMB = { thumbnail_width: 720, thumbnail_height: 720 };
 const METRIC_FIELDS = "date_start,date_stop,spend,impressions,reach,clicks,inline_link_clicks,actions,action_values";
 const LEVEL_ID: Record<MetaInsightLevel, { api: string; id: string; name?: string }> = {
   ACCOUNT: { api: "account", id: "account_id" },
@@ -242,10 +245,9 @@ async function syncEntities(adAccountId: string, act: string, currency: string, 
   const creativeExtIds = [...new Set(ads.map((a) => a.creative?.id).filter((x): x is string => !!x))];
   const creativeIds = new Map<string, string>();
   for (let i = 0; i < creativeExtIds.length; i += 50) {
-    const batch = creativeExtIds.slice(i, i + 50);
-    const res = await graphGet<Record<string, RawCreative>>("", { ids: batch.join(","), fields: CREATIVE_FIELDS, thumbnail_width: 720, thumbnail_height: 720 }, token);
+    const batch = await fetchCreatives(creativeExtIds.slice(i, i + 50), token);
     const saved = await db.$transaction(
-      Object.values(res).map((c) => {
+      batch.map((c) => {
         const d = describeCreative(c);
         const data = {
           adAccountId,
@@ -292,6 +294,33 @@ async function syncEntities(adAccountId: string, act: string, currency: string, 
     ),
   );
   return campaigns.length + validSets.length + creativeExtIds.length + validAds.length;
+}
+
+/** Erros que não adianta contornar campo a campo: interrompem a sincronização. */
+const isFatal = (e: unknown) => e instanceof MetaApiError && (e.kind === "auth" || e.kind === "rate_limit");
+
+/**
+ * Busca criativos em lote; se a Meta recusar o lote (ex.: um campo indisponível para algum formato),
+ * tenta um a um com menos campos. Criativo que ainda falhar fica sem prévia, sem travar a sincronização.
+ */
+async function fetchCreatives(ids: string[], token: string): Promise<RawCreative[]> {
+  try {
+    return Object.values(await graphGet<Record<string, RawCreative>>("", { ids: ids.join(","), fields: CREATIVE_FIELDS, ...THUMB }, token));
+  } catch (e) {
+    if (isFatal(e)) throw e;
+  }
+  const out: RawCreative[] = [];
+  for (const id of ids) {
+    for (const fields of CREATIVE_FALLBACK_FIELDS) {
+      try {
+        out.push(await graphGet<RawCreative>(id, { fields, ...THUMB }, token));
+        break;
+      } catch (e) {
+        if (isFatal(e)) throw e;
+      }
+    }
+  }
+  return out;
 }
 
 function insightData(adAccountId: string, level: MetaInsightLevel, r: InsightRow, fallbackId: string) {
