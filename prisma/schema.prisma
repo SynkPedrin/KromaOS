@@ -149,6 +149,7 @@ model Client {
   files            FileAsset[]       @relation("ClientFiles")
   cashEntries      CashEntry[]
   agendaEvents     AgendaEvent[]
+  metaAdAccounts   MetaAdAccount[]
 
   @@index([status])
   @@index([archivedAt])
@@ -655,4 +656,258 @@ model AgendaEventAttendee {
 
   @@id([eventId, userId])
   @@index([userId])
+}
+
+// ───────────────────────────── Anúncios (Meta Ads) ─────────────────────────────
+// Somente leitura: o KROMA OS acompanha campanhas, nunca as edita.
+
+enum MetaConnectionStatus {
+  CONNECTED
+  EXPIRED
+  REVOKED
+  PERMISSION_DENIED
+  ERROR
+  DISCONNECTED
+}
+
+/// Autorização OAuth de um usuário da Meta. O token fica cifrado (AES-256-GCM) e nunca sai do servidor.
+model MetaConnection {
+  id                   String               @id @default(cuid())
+  status               MetaConnectionStatus @default(CONNECTED)
+  encryptedAccessToken String?
+  tokenExpiresAt       DateTime?
+  dataAccessExpiresAt  DateTime?
+  scopes               String[]             @default([])
+  metaUserId           String               @unique
+  metaUserName         String?
+  connectedById        String?
+  lastValidatedAt      DateTime?
+  lastError            String?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  adAccounts MetaAdAccount[]
+}
+
+/// Conta de anúncios. O vínculo com o cliente é explícito (clientId) e cada conta pertence a no máximo um cliente.
+model MetaAdAccount {
+  id              String    @id @default(cuid())
+  externalId      String    @unique // act_123…
+  name            String
+  currency        String    @default("BRL")
+  timezone        String    @default("America/Sao_Paulo")
+  accountStatus   Int?
+  disableReason   Int?
+  businessName    String?
+  connectionId    String?
+  clientId        String?
+  // Só contas habilitadas e vinculadas a um cliente são sincronizadas.
+  enabled         Boolean   @default(false)
+  lastSyncedAt    DateTime?
+  lastSyncOk      Boolean?
+  lastSyncError   String?
+  syncLockedUntil DateTime?
+  // Primeiro dia com métricas diárias sincronizadas (para avisar quando o período pedido é anterior).
+  historyFrom     DateTime? @db.Date
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  connection MetaConnection?     @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  client     Client?             @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  campaigns  MetaCampaign[]
+  adSets     MetaAdSet[]
+  ads        MetaAd[]
+  creatives  MetaCreative[]
+  insights   MetaInsight[]
+  periods    MetaInsightPeriod[]
+  syncJobs   MetaSyncJob[]
+
+  @@index([clientId])
+  @@index([connectionId])
+}
+
+model MetaCampaign {
+  id                  String    @id @default(cuid())
+  externalId          String    @unique
+  adAccountId         String
+  name                String
+  objective           String?
+  status              String?
+  effectiveStatus     String?
+  buyingType          String?
+  // Orçamentos na menor unidade da moeda (centavos), como a Meta retorna.
+  dailyBudgetCents    Int?
+  lifetimeBudgetCents Int?
+  startTime           DateTime?
+  stopTime            DateTime?
+  createdTime         DateTime?
+  updatedTime         DateTime?
+  syncedAt            DateTime  @default(now())
+
+  adAccount MetaAdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  adSets    MetaAdSet[]
+  ads       MetaAd[]
+
+  @@index([adAccountId])
+}
+
+model MetaAdSet {
+  id                  String    @id @default(cuid())
+  externalId          String    @unique
+  adAccountId         String
+  campaignId          String
+  name                String
+  status              String?
+  effectiveStatus     String?
+  dailyBudgetCents    Int?
+  lifetimeBudgetCents Int?
+  optimizationGoal    String?
+  billingEvent        String?
+  bidStrategy         String?
+  destinationType     String?
+  promotedObject      Json?
+  targeting           Json?
+  startTime           DateTime?
+  endTime             DateTime?
+  syncedAt            DateTime  @default(now())
+
+  adAccount MetaAdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  campaign  MetaCampaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  ads       MetaAd[]
+
+  @@index([adAccountId])
+  @@index([campaignId])
+}
+
+model MetaCreative {
+  id                    String   @id @default(cuid())
+  externalId            String   @unique
+  adAccountId           String
+  name                  String?
+  objectType            String?
+  // IMAGE, VIDEO, CAROUSEL ou OTHER (deduzido dos campos retornados pela API).
+  format                String   @default("OTHER")
+  thumbnailUrl          String?
+  imageUrl              String?
+  videoId               String?
+  primaryText           String?
+  headline              String?
+  description           String?
+  callToAction          String?
+  linkUrl               String?
+  instagramPermalinkUrl String?
+  carousel              Json?
+  syncedAt              DateTime @default(now())
+
+  adAccount MetaAdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  ads       MetaAd[]
+
+  @@index([adAccountId])
+}
+
+model MetaAd {
+  id              String    @id @default(cuid())
+  externalId      String    @unique
+  adAccountId     String
+  campaignId      String
+  adSetId         String
+  creativeId      String?
+  name            String
+  status          String?
+  effectiveStatus String?
+  previewUrl      String?
+  createdTime     DateTime?
+  updatedTime     DateTime?
+  syncedAt        DateTime  @default(now())
+
+  adAccount MetaAdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  campaign  MetaCampaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  adSet     MetaAdSet     @relation(fields: [adSetId], references: [id], onDelete: Cascade)
+  creative  MetaCreative? @relation(fields: [creativeId], references: [id], onDelete: SetNull)
+
+  @@index([adAccountId])
+  @@index([adSetId])
+  @@index([campaignId])
+}
+
+enum MetaInsightLevel {
+  ACCOUNT
+  CAMPAIGN
+  ADSET
+  AD
+}
+
+/// Métricas diárias (time_increment=1) por nível. Somáveis entre dias, exceto alcance.
+model MetaInsight {
+  id           String           @id @default(cuid())
+  adAccountId  String
+  level        MetaInsightLevel
+  externalId   String
+  name         String?
+  date         DateTime         @db.Date
+  spendCents   Int              @default(0)
+  impressions  Int              @default(0)
+  reach        Int?
+  clicks       Int              @default(0)
+  linkClicks   Int?
+  // { action_type: quantidade } e { action_type: valor em centavos }.
+  actions      Json             @default("{}")
+  actionValues Json             @default("{}")
+  attribution  String           @default("unified")
+  syncedAt     DateTime         @default(now())
+
+  adAccount MetaAdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([adAccountId, level, externalId, date])
+  @@index([adAccountId, level, date])
+}
+
+/// Alcance e frequência de um período fechado (não são somáveis dia a dia). Cache de leitura da API.
+model MetaInsightPeriod {
+  id          String           @id @default(cuid())
+  adAccountId String
+  level       MetaInsightLevel
+  externalId  String
+  since       DateTime         @db.Date
+  until       DateTime         @db.Date
+  reach       Int?
+  impressions Int              @default(0)
+  spendCents  Int              @default(0)
+  fetchedAt   DateTime         @default(now())
+
+  adAccount MetaAdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([adAccountId, level, externalId, since, until])
+}
+
+enum MetaSyncKind {
+  INITIAL
+  RECENT
+  RECONCILE
+  MANUAL
+}
+
+enum MetaSyncStatus {
+  RUNNING
+  SUCCESS
+  ERROR
+  SKIPPED
+}
+
+model MetaSyncJob {
+  id            String         @id @default(cuid())
+  adAccountId   String?
+  kind          MetaSyncKind
+  status        MetaSyncStatus @default(RUNNING)
+  triggeredById String?
+  since         DateTime?      @db.Date
+  until         DateTime?      @db.Date
+  records       Int            @default(0)
+  error         String?
+  startedAt     DateTime       @default(now())
+  finishedAt    DateTime?
+
+  adAccount MetaAdAccount? @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+
+  @@index([adAccountId, startedAt])
 }

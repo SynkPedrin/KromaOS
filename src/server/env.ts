@@ -33,6 +33,21 @@ const schema = z.object({
   SMTP_FROM: z.string().optional(),
   RESEND_API_KEY: z.string().optional(),
   RESEND_FROM_EMAIL: z.string().optional(),
+
+  // Meta Ads (somente leitura). App Secret e chave de criptografia ficam só no servidor.
+  META_APP_ID: z.string().regex(/^\d+$/).optional(),
+  META_APP_SECRET: z.string().min(16).optional(),
+  META_GRAPH_API_VERSION: z
+    .string()
+    .regex(/^v\d+\.\d+$/, "Use o formato v26.0")
+    .default("v26.0"),
+  META_OAUTH_REDIRECT_URI: z.string().url().optional(),
+  // Facebook Login for Business: quando o app usa "configuração", o diálogo recebe config_id em vez de scope.
+  META_LOGIN_CONFIG_ID: z.string().optional(),
+  META_INITIAL_AD_ACCOUNT_ID: z.string().optional(),
+  META_TOKEN_ENCRYPTION_KEY: z.string().min(32, "META_TOKEN_ENCRYPTION_KEY precisa de pelo menos 32 caracteres").optional(),
+  META_WEBHOOK_VERIFY_TOKEN: z.string().optional(),
+  META_SYNC_CRON_SECRET: z.string().min(16).optional(),
 });
 
 export type Env = z.infer<typeof schema>;
@@ -69,4 +84,18 @@ export function emailProvider(): "smtp" | "resend" | null {
 
 export function isEmailConfigured() {
   return emailProvider() !== null;
+}
+
+/** Itens que faltam para a integração com a Meta funcionar (nomes das variáveis, nunca valores). */
+export function metaMissingConfig(): string[] {
+  const e = env();
+  return (["META_APP_ID", "META_APP_SECRET", "META_TOKEN_ENCRYPTION_KEY"] as const).filter((k) => !e[k]);
+}
+
+export const isMetaConfigured = () => metaMissingConfig().length === 0;
+
+/** Redirect URI cadastrado no app da Meta (padrão: APP_URL + callback). */
+export function metaRedirectUri() {
+  const e = env();
+  return e.META_OAUTH_REDIRECT_URI ?? `${e.APP_URL.replace(/\/$/, "")}/api/integrations/meta/callback`;
 }

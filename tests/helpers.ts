@@ -3,6 +3,7 @@ import { hashPassword } from "@/server/auth/crypto";
 import type { Role } from "@/generated/prisma/enums";
 
 const TABLES = [
+  "MetaSyncJob", "MetaInsightPeriod", "MetaInsight", "MetaAd", "MetaCreative", "MetaAdSet", "MetaCampaign", "MetaAdAccount", "MetaConnection",
   "Notification", "TimeEntry", "TaskActivity", "TaskComment", "ChecklistItem", "ContentApproval",
   "AgendaEventAttendee", "AgendaEvent", "ContentMetadata", "FileAsset", "Task", "CashEntry", "FinanceSettings", "Invoice", "MediaInvestment", "ClientContract", "ClientMember",
   "ClientService", "Client", "Invitation", "Session", "RateLimit", "User",

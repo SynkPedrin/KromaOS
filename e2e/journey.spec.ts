@@ -207,6 +207,24 @@ test("calendário: cria, edita e exclui evento com horário", async ({ page }) =
   await expect(page.locator('[title^="Evento: Gravação Aurora"]:visible')).toHaveCount(0);
 });
 
+test("anúncios: sem conta conectada e integração sem configuração no servidor", async ({ page }) => {
+  await login(page);
+  await page.getByRole("navigation", { name: "Navegação principal" }).getByRole("link", { name: "Anúncios" }).click();
+  await expect(page).toHaveURL(/\/anuncios$/);
+  await expect(page.getByText("Nenhuma conta conectada")).toBeVisible();
+  await page.getByRole("link", { name: "Conectar Meta Ads" }).click();
+  await expect(page).toHaveURL(/\/configuracoes\/integracoes\/meta/);
+  // Sem App ID/Secret/chave no ambiente de teste: botão desabilitado e nada de OAuth.
+  await expect(page.getByText("Configuração pendente no servidor")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Conectar Meta Ads" })).toBeDisabled();
+  await page.goto("/api/integrations/meta/connect");
+  await expect(page).toHaveURL(/erro=configuracao/);
+  await expect(page.getByText(/ainda não está configurada/)).toBeVisible();
+  // Cliente sem conta vinculada.
+  await page.goto(new URL(clientUrl, "http://localhost:3457").pathname.replace("/clientes/", "/anuncios/clientes/"));
+  await expect(page.getByText("Nenhuma conta de anúncios vinculada")).toBeVisible();
+});
+
 test("convida membro e aceita o convite", async ({ page }) => {
   await login(page);
   await page.goto("/membros");
@@ -243,6 +261,12 @@ test("membro aceita convite e permissões são aplicadas", async ({ browser }) =
 
   // Não vinculado ao cliente: não vê o cliente nem suas tarefas (IDOR).
   await page.goto(clientUrl);
+  await expect(page.getByText(/não encontrado/i).first()).toBeVisible();
+
+  // Anúncios: integração restrita a administradores e cliente não vinculado dá 404.
+  await page.goto("/configuracoes/integracoes/meta");
+  await expect(page.getByText("Acesso restrito")).toBeVisible();
+  await page.goto(new URL(clientUrl, "http://localhost:3457").pathname.replace("/clientes/", "/anuncios/clientes/"));
   await expect(page.getByText(/não encontrado/i).first()).toBeVisible();
 
   // Link de convite é de uso único.

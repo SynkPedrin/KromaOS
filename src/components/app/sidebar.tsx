@@ -14,6 +14,7 @@ import {
   ListChecks,
   ListTodo,
   LogOut,
+  Megaphone,
   MoreHorizontal,
   Settings,
   Sparkles,
@@ -54,6 +55,7 @@ export function useNavSections() {
       title: "Gestão",
       items: [
         { href: "/clientes", label: "Clientes", icon: Building2 },
+        { href: "/anuncios", label: "Anúncios", icon: Megaphone },
         { href: "/financeiro", label: "Financeiro", icon: Wallet, finance: true },
       ],
     },

@@ -1,4 +1,7 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import { Plug } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { requireUser } from "@/server/auth/session";
 import { isAdmin } from "@/server/auth/permissions";
 import { env, isEmailConfigured } from "@/server/env";
@@ -22,7 +25,19 @@ export default async function SettingsPage() {
     : null;
   return (
     <>
-      <PageHeader title="Configurações" description="Seu perfil, sua senha e o estado do sistema." />
+      <PageHeader
+        title="Configurações"
+        description="Seu perfil, sua senha e o estado do sistema."
+        actions={
+          isAdmin(user) ? (
+            <Button variant="secondary" asChild>
+              <Link href="/configuracoes/integracoes/meta">
+                <Plug /> Integrações · Meta Ads
+              </Link>
+            </Button>
+          ) : undefined
+        }
+      />
       <SettingsView system={system} />
     </>
   );

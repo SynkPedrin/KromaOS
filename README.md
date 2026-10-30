@@ -2,7 +2,7 @@
 
 **KROMA — Sua marca em outra frequência.**
 
-Central de operações da agência KROMA: clientes com kit de marca, tarefas no estilo ClickUp (Lista agrupada ou Pipeline), subtarefas, comentários com menções, arquivos, controle de tempo, KROMA Studio (posts, carrosséis, reels e criativos com legenda, prévia, aprovação e publicação), calendário editorial, financeiro operacional com entradas, saídas e saldo em conta, equipe com convites e notificações.
+Central de operações da agência KROMA: clientes com kit de marca, tarefas no estilo ClickUp (Lista agrupada ou Pipeline), subtarefas, comentários com menções, arquivos, controle de tempo, KROMA Studio (posts, carrosséis, reels e criativos com legenda, prévia, aprovação e publicação), calendário editorial, financeiro operacional com entradas, saídas e saldo em conta, **Anúncios** (Meta Ads somente leitura: investimento, campanhas, conjuntos e criativos por cliente; veja `docs/META_ADS_INTEGRATION.md`), equipe com convites e notificações.
 
 Uso interno. Monólito Next.js + PostgreSQL, pensado para ser mantido por uma pessoa.
 

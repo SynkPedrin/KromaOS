@@ -22,7 +22,8 @@ const csp = [
   // Next injeta scripts inline de hidratação; sem nonce, 'unsafe-inline' é necessário.
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
-  `img-src 'self' data: blob: ${s3}`,
+  // Miniaturas e imagens de criativos servidas pela CDN da Meta (Anúncios).
+  `img-src 'self' data: blob: ${s3} https://*.fbcdn.net https://*.cdninstagram.com`,
   `media-src 'self' blob: ${s3}`,
   `connect-src 'self' ${s3}${isDev ? " ws:" : ""}`,
   `frame-src 'self' ${s3}`,
