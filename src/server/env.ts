@@ -25,6 +25,12 @@ const schema = z.object({
   UPLOAD_MAX_DOCUMENT_MB: z.coerce.number().positive().default(30),
   UPLOAD_MAX_VIDEO_MB: z.coerce.number().positive().default(500),
 
+  // E-mail: SMTP (ex.: Gmail com senha de app) tem prioridade; senão, Resend.
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().positive().default(465),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
   RESEND_API_KEY: z.string().optional(),
   RESEND_FROM_EMAIL: z.string().optional(),
 });
@@ -54,7 +60,13 @@ export function env(): Env {
   return cached;
 }
 
-export function isEmailConfigured() {
+export function emailProvider(): "smtp" | "resend" | null {
   const e = env();
-  return Boolean(e.RESEND_API_KEY && e.RESEND_FROM_EMAIL);
+  if (e.SMTP_HOST && e.SMTP_USER && e.SMTP_PASS) return "smtp";
+  if (e.RESEND_API_KEY && e.RESEND_FROM_EMAIL) return "resend";
+  return null;
+}
+
+export function isEmailConfigured() {
+  return emailProvider() !== null;
 }

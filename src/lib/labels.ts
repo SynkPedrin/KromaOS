@@ -133,6 +133,7 @@ export const NOTIFICATION_TYPE: Record<NotificationType, { label: string }> = {
   OVERDUE: { label: "Tarefa atrasada" },
   APPROVAL_REQUESTED: { label: "Aprovação solicitada" },
   CHANGES_REQUESTED: { label: "Ajustes solicitados" },
+  EVENT_INVITE: { label: "Evento" },
 };
 
 export const taskCode = (n: number) => `KR-${n}`;

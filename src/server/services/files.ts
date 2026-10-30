@@ -244,7 +244,7 @@ export async function listStatementFiles(actor: Actor, month: string) {
   const files = await db.fileAsset.findMany({
     where: { status: "READY", statementMonth: dateOnly(`${month}-01`) },
     orderBy: { createdAt: "desc" },
-    include: { uploadedBy: { select: userPublic } },
+    include: { uploadedBy: { select: userPublic }, _count: { select: { statementEntries: true } } },
   });
   return files.map(serialize);
 }

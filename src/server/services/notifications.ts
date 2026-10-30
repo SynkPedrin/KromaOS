@@ -14,6 +14,7 @@ type NewNotification = {
   title: string;
   body?: string | null;
   taskId?: string | null;
+  eventId?: string | null;
   dedupeKey?: string;
 };
 
@@ -25,7 +26,7 @@ export async function notify(tx: DbLike, items: NewNotification[]) {
   const seen = new Set<string>();
   const data = items.filter((n) => {
     if (n.actorId && n.userId === n.actorId) return false;
-    const k = `${n.userId}:${n.type}:${n.taskId ?? ""}`;
+    const k = `${n.userId}:${n.type}:${n.taskId ?? ""}:${n.eventId ?? ""}`;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
@@ -56,6 +57,7 @@ export async function listNotifications(actor: Actor, opts: { unreadOnly?: boole
     include: {
       actor: { select: userPublic },
       task: { select: { id: true, number: true, title: true, client: { select: { name: true } } } },
+      event: { select: { id: true, startsAt: true, allDay: true } },
     },
   });
 }

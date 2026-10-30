@@ -14,7 +14,7 @@ import { InvoicesPanel, type InvoiceRow } from "@/components/finance/invoices-pa
 import { ContractsPanel, type ClientContractRow } from "@/components/finance/contracts-panel";
 import { MediaPanel, type MediaRow } from "@/components/finance/media-panel";
 import { CashPanel, type CashRow } from "@/components/finance/cash-panel";
-import type { FileItem } from "@/components/files/file-list";
+import type { StatementFile } from "@/components/finance/statements-section";
 import { listStatementFiles } from "@/server/services/files";
 import { ymdInTz } from "@/lib/dates";
 import { INVOICE_STATUS } from "@/lib/labels";
@@ -80,7 +80,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
         clients={clients}
         month={month}
         canEditOpening={isAdmin(user)}
-        statements={json(statements) as FileItem[]}
+        statements={json(statements) as StatementFile[]}
       />
     );
   } else if (tab === "recebimentos") {

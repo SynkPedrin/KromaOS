@@ -1,9 +1,10 @@
 "use client";
 
 import { useTransition } from "react";
-import { isToday } from "date-fns";
+import { useRouter } from "next/navigation";
+import { format, isToday } from "date-fns";
 import { motion } from "motion/react";
-import { AlarmClock, AtSign, BadgeCheck, Bell, CheckCheck, ClipboardList, MessageSquare, RotateCcw } from "lucide-react";
+import { AlarmClock, AtSign, BadgeCheck, Bell, CalendarClock, CheckCheck, ClipboardList, MessageSquare, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import type { NotificationType } from "@/generated/prisma/enums";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ export type NotificationRow = {
   readAt: string | null;
   createdAt: string;
   taskId: string | null;
+  event: { id: string; startsAt: string; allDay: boolean } | null;
   actor: { id: string; name: string; avatarColor: string } | null;
   task: { id: string; number: number; title: string; client: { name: string } | null } | null;
 };
@@ -34,10 +36,12 @@ const ICON: Record<NotificationType, React.ElementType> = {
   OVERDUE: AlarmClock,
   APPROVAL_REQUESTED: BadgeCheck,
   CHANGES_REQUESTED: RotateCcw,
+  EVENT_INVITE: CalendarClock,
 };
 
 function Item({ n, index }: { n: NotificationRow; index: number }) {
   const { openTask } = useApp();
+  const router = useRouter();
   const [, start] = useTransition();
   const Icon = ICON[n.type];
   const unread = !n.readAt;
@@ -52,6 +56,8 @@ function Item({ n, index }: { n: NotificationRow; index: number }) {
               if (!r.ok) toast.error(r.error);
             }
             if (n.taskId) openTask(n.taskId);
+            // Evento: abre o calendário no dia (dia inteiro guarda a data às 12:00 UTC).
+            else if (n.event) router.push(`/calendario?date=${n.event.allDay ? n.event.startsAt.slice(0, 10) : format(new Date(n.event.startsAt), "yyyy-MM-dd")}`);
           })
         }
         className={cn(

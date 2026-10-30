@@ -280,25 +280,29 @@ enum CashEntryType {
 // Entradas e saídas da conta da agência. Só lançamentos realizados (settled) compõem o saldo;
 // os demais são previsões (contas a pagar/receber).
 model CashEntry {
-  id          String        @id @default(cuid())
-  type        CashEntryType
-  description String
-  amountCents Int
+  id              String        @id @default(cuid())
+  type            CashEntryType
+  description     String
+  amountCents     Int
   // Data do lançamento (data pura, 12:00 UTC).
-  date        DateTime
-  category    String
-  settled     Boolean       @default(true)
-  clientId    String?
+  date            DateTime
+  category        String
+  settled         Boolean       @default(true)
+  clientId        String?
   // Entrada gerada automaticamente ao marcar uma cobrança como paga.
-  invoiceId   String?       @unique
-  notes       String?
-  createdById String
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  invoiceId       String?       @unique
+  notes           String?
+  // Importação de extrato: arquivo de origem e chave da movimentação (evita importar duas vezes).
+  statementFileId String?
+  importKey       String?       @unique
+  createdById     String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
-  client    Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  createdBy User     @relation(fields: [createdById], references: [id])
+  client        Client?    @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  invoice       Invoice?   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  statementFile FileAsset? @relation("StatementEntries", fields: [statementFileId], references: [id], onDelete: SetNull)
+  createdBy     User       @relation(fields: [createdById], references: [id])
 
   @@index([date])
   @@index([type, date])
@@ -568,10 +572,11 @@ model FileAsset {
   statementMonth DateTime?
   createdAt      DateTime            @default(now())
 
-  uploadedBy User    @relation(fields: [uploadedById], references: [id])
-  task       Task?   @relation("TaskFiles", fields: [taskId], references: [id], onDelete: Cascade)
-  client     Client? @relation("ClientFiles", fields: [clientId], references: [id], onDelete: Cascade)
-  logoOf     Client? @relation("ClientLogo")
+  uploadedBy       User        @relation(fields: [uploadedById], references: [id])
+  task             Task?       @relation("TaskFiles", fields: [taskId], references: [id], onDelete: Cascade)
+  client           Client?     @relation("ClientFiles", fields: [clientId], references: [id], onDelete: Cascade)
+  logoOf           Client?     @relation("ClientLogo")
+  statementEntries CashEntry[] @relation("StatementEntries")
 
   @@index([taskId])
   @@index([clientId])
@@ -589,6 +594,7 @@ enum NotificationType {
   OVERDUE
   APPROVAL_REQUESTED
   CHANGES_REQUESTED
+  EVENT_INVITE
 }
 
 model Notification {
@@ -599,14 +605,16 @@ model Notification {
   title     String
   body      String?
   taskId    String?
+  eventId   String?
   // Evita notificações duplicadas geradas pela rotina agendada.
   dedupeKey String?          @unique
   readAt    DateTime?
   createdAt DateTime         @default(now())
 
-  user  User  @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
-  actor User? @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
-  task  Task? @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user  User         @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor User?        @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  task  Task?        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  event AgendaEvent? @relation(fields: [eventId], references: [id], onDelete: Cascade)
 
   @@index([userId, readAt, createdAt])
 }
@@ -629,9 +637,10 @@ model AgendaEvent {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  client    Client?               @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  createdBy User                  @relation(fields: [createdById], references: [id])
-  attendees AgendaEventAttendee[]
+  client        Client?               @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  createdBy     User                  @relation(fields: [createdById], references: [id])
+  attendees     AgendaEventAttendee[]
+  notifications Notification[]
 
   @@index([startsAt])
   @@index([clientId])

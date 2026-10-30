@@ -22,7 +22,7 @@ export function FileUploader({
   hint = "PNG, JPG, WEBP, MP4, MOV, PDF ou DOCX",
 }: {
   target: UploadTarget;
-  onUploaded?: () => void;
+  onUploaded?: (fileId: string) => void;
   compact?: boolean;
   asClientLogo?: boolean;
   accept?: string;
@@ -49,7 +49,7 @@ export function FileUploader({
     });
     if (!r.ok) return fail(r.error);
     setUploads((l) => l.filter((u) => u.key !== key));
-    onUploaded?.();
+    onUploaded?.(r.id);
   }
 
   async function handle(files: FileList | File[]) {

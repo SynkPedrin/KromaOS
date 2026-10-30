@@ -5,6 +5,9 @@ import type { Prisma } from "@/generated/prisma/client";
 import { clientScope, isManagerOrAdmin, taskScope, type Actor } from "@/server/auth/permissions";
 import { forbidden, invalid, notFound } from "@/server/errors";
 import { agendaEventSchema, type AgendaEventInput } from "@/lib/schemas";
+import { env } from "@/server/env";
+import { sendEventEmail } from "@/server/email";
+import { notify } from "./notifications";
 import { dateOnly } from "@/lib/dates";
 import { logActivity, userPublic } from "./shared";
 import { getVisibleTask } from "./tasks";
@@ -203,23 +206,76 @@ async function editableEvent(actor: Actor, eventId: string) {
   return e;
 }
 
+/**
+ * Avisa quem acabou de ser adicionado ao evento: notificação na plataforma e e-mail com o .ics.
+ * Falha de e-mail não desfaz o evento (o aviso na plataforma continua valendo).
+ */
+async function notifyNewAttendees(actor: Actor, eventId: string, userIds: string[]) {
+  const ids = userIds.filter((id) => id !== actor.id);
+  if (!ids.length) return;
+  const e = await db.agendaEvent.findUniqueOrThrow({
+    where: { id: eventId },
+    include: {
+      client: { select: { name: true } },
+      createdBy: { select: { name: true } },
+      attendees: { include: { user: { select: { id: true, name: true, email: true, active: true } } } },
+    },
+  });
+  const organizer = await db.user.findUniqueOrThrow({ where: { id: actor.id }, select: { name: true } });
+  const when = e.allDay ? e.startsAt.toISOString().slice(0, 10) : null;
+  await notify(
+    db,
+    ids.map((userId) => ({
+      userId,
+      actorId: actor.id,
+      type: "EVENT_INVITE" as const,
+      title: `${organizer.name} adicionou você a “${e.title}”`,
+      body: [e.location, e.client?.name].filter(Boolean).join(" · ") || null,
+      eventId,
+    })),
+  );
+  const day = when ?? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(e.startsAt);
+  const payload = {
+    title: e.title,
+    startsAt: e.startsAt,
+    endsAt: e.endsAt,
+    allDay: e.allDay,
+    location: e.location,
+    notes: e.notes,
+    clientName: e.client?.name ?? null,
+    organizerName: organizer.name,
+    attendeeNames: e.attendees.map((a) => a.user.name),
+    url: `${env().APP_URL}/calendario?date=${day}`,
+  };
+  const recipients = e.attendees.map((a) => a.user).filter((u) => ids.includes(u.id) && u.active);
+  const results = await Promise.all(recipients.map((u) => sendEventEmail(u, e.id, payload)));
+  const failed = results.filter((r) => !r.sent && r.reason === "failed").length;
+  // Só a contagem: nunca registra endereços ou credenciais.
+  if (failed) console.warn(`[agenda] ${failed} e-mail(s) de evento não enviados`);
+}
+
 export async function createAgendaEvent(actor: Actor, input: AgendaEventInput) {
   const { data, attendeeIds } = await eventData(actor, input);
-  return db.agendaEvent.create({
+  const e = await db.agendaEvent.create({
     data: { ...data, createdById: actor.id, attendees: { create: attendeeIds.map((userId) => ({ userId })) } },
   });
+  await notifyNewAttendees(actor, e.id, attendeeIds);
+  return e;
 }
 
 export async function updateAgendaEvent(actor: Actor, eventId: string, input: AgendaEventInput) {
   await editableEvent(actor, eventId);
   const { data, attendeeIds } = await eventData(actor, input);
-  return db.$transaction(async (tx) => {
+  const before = new Set((await db.agendaEventAttendee.findMany({ where: { eventId }, select: { userId: true } })).map((a) => a.userId));
+  const updated = await db.$transaction(async (tx) => {
     await tx.agendaEventAttendee.deleteMany({ where: { eventId } });
     return tx.agendaEvent.update({
       where: { id: eventId },
       data: { ...data, attendees: { create: attendeeIds.map((userId) => ({ userId })) } },
     });
   });
+  await notifyNewAttendees(actor, eventId, attendeeIds.filter((id) => !before.has(id)));
+  return updated;
 }
 
 export async function deleteAgendaEvent(actor: Actor, eventId: string) {

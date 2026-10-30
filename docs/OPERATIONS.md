@@ -68,3 +68,15 @@ Na Vercel, rode `npm run db:migrate` antes de promover o deploy (ou como etapa d
 - **Vídeo MOV não toca:** o codec (geralmente HEVC/ProRes) não é suportado pelo navegador. O sistema oferece download; para preview, exporte em MP4 (H.264).
 - **E-mail de convite não chega:** veja o erro no convite (Membros → convites pendentes). Confira domínio verificado e `RESEND_FROM_EMAIL` usando esse domínio.
 - **Prisma Studio:** `npm run db:studio` para inspecionar dados (use com cuidado em produção).
+
+## Importação de extratos (Entradas e saídas)
+
+- O PDF anexado em **Extratos do mês** é lido pelo servidor (posição do texto na página, sem IA e sem enviar o arquivo a terceiros). A prévia mostra as movimentações, a categoria sugerida e confere a soma com os "Total de entradas/saídas" impressos.
+- Só entram as linhas marcadas, como lançamentos **realizados**. Data, valor e tipo vêm sempre da releitura do PDF no servidor.
+- Cada movimentação tem uma chave (`CashEntry.importKey`); reimportar o mesmo extrato ou outro com período sobreposto não duplica. Lançamentos manuais com mesma data, tipo e valor aparecem como "possível duplicado" e começam desmarcados.
+- Testado com o relatório de movimentações do InfinitePay e com o formato clássico `dd/mm … 1.234,56 D/C`. Extratos escaneados (imagem) não têm texto e precisam ser lançados à mão.
+
+## Avisos de evento
+
+Quem é adicionado a um evento recebe notificação na plataforma e, se houver e-mail configurado (SMTP ou Resend), um e-mail com o arquivo `.ics`. Quem criou o evento e quem já estava nele não recebem de novo.
+

@@ -23,9 +23,8 @@ import {
   setOpeningBalanceAction,
   updateCashEntryAction,
 } from "@/app/actions/finance";
-import type { FileItem } from "@/components/files/file-list";
 import { MoneyInput, PendingSpinner, Stat, useUrlParams } from "./finance-ui";
-import { StatementsSection } from "./statements-section";
+import { StatementsSection, type StatementFile } from "./statements-section";
 
 export type CashRow = {
   id: string;
@@ -438,7 +437,7 @@ export function CashPanel({
   clients: ClientOpt[];
   month: string;
   canEditOpening: boolean;
-  statements: FileItem[];
+  statements: StatementFile[];
 }) {
   const { params, set, pending } = useUrlParams();
   const [creating, setCreating] = useState<{ type: CashEntryType; key: number } | null>(null);

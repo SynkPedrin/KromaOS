@@ -69,6 +69,14 @@ Rode antes de publicar um código que dependa da migration nova.
 4. Sem `RESEND_FROM_EMAIL` o sistema continua funcionando: o convite é criado e a tela mostra o link com os botões **Copiar** e **Enviar pelo WhatsApp**. A pessoa abre, cria a senha e entra.
 5. Sem domínio verificado o Resend só entrega para o e-mail do dono da conta (remetente `onboarding@resend.dev`), por isso a produção está em modo link. Quando houver domínio: verifique-o no Resend, rode `printf 'KROMA OS <convites@dominio>' | vercel env add RESEND_FROM_EMAIL production` e publique de novo.
 
+## 3b. Gmail (SMTP) — envio sem domínio próprio
+
+Com `SMTP_HOST`, `SMTP_USER` e `SMTP_PASS` definidos, os e-mails (convites e avisos de evento com o `.ics`) saem por SMTP e o Resend é ignorado.
+
+1. Na conta Google remetente, ative a verificação em 2 etapas e crie uma **senha de app** em https://myaccount.google.com/apppasswords.
+2. Variáveis de produção: `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, `SMTP_USER=<gmail>`, `SMTP_PASS=<senha de app>`, `SMTP_FROM="KROMA OS <gmail>"`.
+3. Limite do Gmail: cerca de 500 destinatários por dia. Para volume maior ou remetente profissional, verifique um domínio no Resend e remova as variáveis SMTP.
+
 ## 4. Vercel
 
 1. Importe o repositório (a raiz do repositório já é o app; **Root Directory** = `.`).

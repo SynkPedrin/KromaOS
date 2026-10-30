@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { withUser } from "@/server/action";
 import * as finance from "@/server/services/finance";
+import * as statements from "@/server/services/statement-import";
 import * as cash from "@/server/services/cash";
 import { saveContract } from "@/server/services/clients";
 import type { CashEntryInput, ContractInput, InvoiceInput, MediaInvestmentInput } from "@/lib/schemas";
@@ -92,3 +93,16 @@ export async function setOpeningBalanceAction(cents: number) {
     refresh();
   });
 }
+
+export async function previewStatementImportAction(fileId: string) {
+  return withUser((u) => statements.previewStatementImport(u, fileId));
+}
+
+export async function importStatementAction(input: statements.StatementImportInput) {
+  return withUser(async (u) => {
+    const r = await statements.importStatement(u, input);
+    refresh();
+    return r;
+  });
+}
+

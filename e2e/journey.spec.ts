@@ -1,5 +1,6 @@
 import { expect, test, type Browser } from "@playwright/test";
 import { login } from "./session";
+import { pdfWithText } from "../tests/fixtures/statement-pdf";
 
 // Critérios de aceite entre módulos: cliente → tarefa → Studio → calendário → financeiro → convite → permissões.
 // Roda depois de core.spec.ts (mesmo banco; o administrador já existe).
@@ -10,7 +11,6 @@ const PNG_1PX = Buffer.from(
   "base64",
 );
 const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypmp42"), Buffer.alloc(64)]);
-const PDF = Buffer.from("%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF");
 let clientUrl = "";
 let inviteUrl = "";
 
@@ -127,14 +127,42 @@ test("entradas e saídas: cobrança paga entra no caixa e o saldo fecha", async 
   await expect(balance).toContainText("R$ 1.700,00");
 });
 
-test("extrato do banco em PDF anexado em entradas e saídas", async ({ page }) => {
+test("extrato do banco em PDF: anexa, lê as movimentações e importa para o caixa", async ({ page }) => {
   await login(page);
   await page.goto("/financeiro?tab=caixa");
+  const balance = page.getByRole("region", { name: "Saldo em conta" });
+  await expect(balance).toContainText("R$ 2.200,00");
+
+  // Extrato com data de hoje (formato dd/mm/aaaa) e totais impressos para conferência.
+  const now = new Date();
+  const today = `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()}`;
+  const pdf = pdfWithText([
+    [420, 520, "Total de entradas"], [780, 520, "+ 2.000,00"],
+    [420, 505, "Total de saidas"], [780, 505, "- 465,00"],
+    [13, 470, "Data"], [164, 470, "Descricao"], [788, 470, "Valor (R$)"],
+    [13, 450, today], [164, 450, "Pix recebido Cliente Aurora"], [788, 450, "+2.000,00"],
+    [164, 430, "Cartao ADOBE"], [788, 430, "-99,00"],
+    [164, 410, "Pix enviado Freelancer"], [788, 410, "-350,00"],
+    [164, 390, "IOF ADOBE"], [788, 390, "-16,00"],
+  ]);
   const section = page.getByRole("region", { name: /Extratos de/ });
-  await section.locator('input[type="file"]').setInputFiles({ name: "Extrato Inter.pdf", mimeType: "application/pdf", buffer: PDF });
-  // O item entra na lista quando o envio é confirmado no servidor.
-  await expect(section.getByRole("button", { name: "Visualizar Extrato Inter.pdf" })).toBeVisible();
-  await page.reload();
+  await section.locator('input[type="file"]').setInputFiles({ name: "Extrato Inter.pdf", mimeType: "application/pdf", buffer: pdf });
+
+  // A prévia abre sozinha depois do envio.
+  const dialog = page.getByRole("dialog", { name: "Importar lançamentos do extrato" });
+  await expect(dialog.getByText("Confere com os totais do extrato")).toBeVisible();
+  await expect(dialog.getByRole("checkbox", { name: /Importar / })).toHaveCount(4);
+  await dialog.getByRole("button", { name: "Importar 4 lançamento(s)" }).click();
+  await expect(page.getByText(/4 lançamento\(s\) importado\(s\)/)).toBeVisible();
+  await expect(balance).toContainText("R$ 3.735,00");
+  await expect(page.getByText("Pix recebido Cliente Aurora").first()).toBeVisible();
+
+  // Reabrir a importação mostra tudo como já importado.
+  await page.getByRole("button", { name: "Importar lançamentos" }).click();
+  await expect(dialog.getByText("Já importado")).toHaveCount(4);
+  await dialog.getByRole("button", { name: "Cancelar" }).click();
+
+  // O PDF continua disponível para consulta.
   await page.getByRole("region", { name: /Extratos de/ }).getByRole("button", { name: "Visualizar Extrato Inter.pdf" }).click();
   await expect(page.getByRole("dialog", { name: "Extrato Inter.pdf" }).locator("iframe")).toBeAttached();
 });

@@ -121,6 +121,31 @@ describe("Eventos da agenda", () => {
     expect(await agendaOf(admin.actor)).toHaveLength(0);
   });
 
+  it("avisa só quem foi adicionado (não quem criou nem quem já estava)", async () => {
+    const { admin, member, outsider } = await setup();
+    const e = await createAgendaEvent(admin.actor, {
+      title: "Reunião de pauta",
+      startsAt: "2030-11-08T13:00:00.000Z",
+      attendeeIds: [admin.id, member.id],
+      location: "https://meet.google.com/abc",
+    });
+    const invites = (userId: string) => db.notification.findMany({ where: { userId, type: "EVENT_INVITE" } });
+    expect(await invites(admin.id)).toHaveLength(0);
+    const [n] = await invites(member.id);
+    expect(n).toMatchObject({ eventId: e.id, actorId: admin.id, title: "Pedro adicionou você a “Reunião de pauta”" });
+
+    await updateAgendaEvent(admin.actor, e.id, {
+      title: "Reunião de pauta",
+      startsAt: "2030-11-08T13:00:00.000Z",
+      attendeeIds: [admin.id, member.id, outsider.id],
+    });
+    expect(await invites(member.id)).toHaveLength(1);
+    expect(await invites(outsider.id)).toHaveLength(1);
+    // Excluir o evento remove os avisos ligados a ele.
+    await deleteAgendaEvent(admin.actor, e.id);
+    expect(await invites(member.id)).toHaveLength(0);
+  });
+
   it("evento de vários dias aparece enquanto está acontecendo", async () => {
     const { admin } = await setup();
     await createAgendaEvent(admin.actor, { title: "Feira", startsAt: "2030-10-30T12:00:00.000Z", endsAt: "2030-11-02T21:00:00.000Z" });
