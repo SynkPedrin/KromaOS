@@ -226,7 +226,7 @@ export function MetaIntegration({ data, notice }: { data: MetaIntegrationData; n
                     <p className="flex flex-wrap items-center gap-2 font-semibold">
                       {c.metaUserName ?? `Usuário ${c.metaUserId}`} <ConnectionBadge status={c.status} />
                     </p>
-                    <p className="text-xs text-ink-3">
+                    <p className="text-xs text-ink-3" suppressHydrationWarning>
                       {c._count.adAccounts} conta(s) · permissões: {c.scopes.join(", ") || "nenhuma"}
                       {c.connectedBy && ` · conectado por ${c.connectedBy}`}
                       {c.lastValidatedAt && ` · verificado ${formatRelative(c.lastValidatedAt)}`}
@@ -309,7 +309,7 @@ export function MetaIntegration({ data, notice }: { data: MetaIntegrationData; n
                       {a.businessName && ` · ${a.businessName}`}
                     </p>
                     {a.clientId && (
-                      <p className={cn("text-xs", a.lastSyncOk === false ? "font-semibold text-danger" : "text-ink-3")}>
+                      <p className={cn("text-xs", a.lastSyncOk === false ? "font-semibold text-danger" : "text-ink-3")} suppressHydrationWarning>
                         {a.lastSyncOk === false ? `Falha: ${a.lastSyncError}` : a.lastSyncedAt ? `Sincronizada ${formatRelative(a.lastSyncedAt)}` : "Aguardando a primeira sincronização"}
                       </p>
                     )}

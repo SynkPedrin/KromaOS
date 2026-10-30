@@ -219,7 +219,7 @@ export function SyncStatus({ accounts, className }: { accounts: AccountSyncInfo[
       ) : neverSynced && !oldest ? (
         <span>Aguardando a primeira sincronização.</span>
       ) : (
-        oldest && <span>Atualizado {formatRelative(oldest)}</span>
+        oldest && <span suppressHydrationWarning>Atualizado {formatRelative(oldest)}</span>
       )}
       {failed && (
         <Tooltip content={failed.lastSyncError ?? "Falha na última sincronização"}>
